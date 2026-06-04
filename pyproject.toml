@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=65.0.0"]
+build_backend = "setuptools.build_meta"
+
+[project]
+name = "MazeCrawler"
+version = "0.1.0"
+dependencies = [
+    "numpy==2.4.6",
+    "pandas==3.0.3",
+    "torch==2.7.1",
+    "stable_baselines3==2.7.1",
+
+    "gymnasium==1.2.0",
+    "kaggle-environments==1.30.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = []

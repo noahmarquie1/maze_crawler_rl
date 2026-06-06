@@ -1,9 +1,18 @@
+import os
+
 from agent import CrawlEnv
 from stable_baselines3 import PPO
 from agent import CrawlEnv
 from kaggle_environments import make
 
-from constants import MODEL_PATH
+from constants import MODEL_PATH, REPLAY_OUTPUT_DIR
+
+
+def setup_output_dir():
+    if not os.path.exists(REPLAY_OUTPUT_DIR):
+        os.makedirs(REPLAY_OUTPUT_DIR)
+
+    return REPLAY_OUTPUT_DIR
 
 
 def run_episode(env: CrawlEnv, model: PPO):
@@ -16,13 +25,19 @@ def run_episode(env: CrawlEnv, model: PPO):
 
 
 if __name__ == "__main__":
+    EPISODES = 5
+
     crawl_env = CrawlEnv()
 
     model = PPO.load(MODEL_PATH)
-    run_episode(crawl_env, model)
-    html_out = crawl_env.render(mode="html", width=800, height=800)
-    if html_out is not None:
-        with open("replay.html", "w") as f:
-            f.write(html_out)
+    for i in range(EPISODES):
+        run_episode(crawl_env, model)
+        html_out = crawl_env.render(mode="html", width=800, height=800)
+
+        replay_dir = setup_output_dir()
+
+        if html_out is not None:
+            with open(os.path.join(replay_dir, f"replay_{i}.html"), "w") as f:
+                f.write(html_out)
 
     print(f"Evaluation Finished successfully.")

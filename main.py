@@ -27,27 +27,27 @@ def my_agent(obs, config, agent: PPO, timestep=None):
     return actions
 
 
-# Load model - Ensure it is written
-model = PPO.load(MODEL_PATH)
-kaggle_agent = lambda obs, config: my_agent(obs, config, model)
-kaggle_env = make("crawl", configuration={"randomSeed": 42})
+if __name__ == "__main__":
+    # Load model - Ensure it is written
+    model = PPO.load(MODEL_PATH)
+    kaggle_agent = lambda obs, config: my_agent(obs, config, model)
+    kaggle_env = make("crawl", configuration={"randomSeed": 42})
 
-# Test agent on single episode
-if not DEBUG:
-    kaggle_env.run([kaggle_agent, "random"])
+    # Test agent on single episode
+    if not DEBUG:
+        kaggle_env.run([kaggle_agent, "random"])
 
-# Optional - debugging mode (does not render)
-else:
-    trainer = kaggle_env.train([None, "random"])
-    obs = trainer.reset()
-    done = False
-    while not done:
-        action = my_agent(obs, None, model)
-        obs, reward, done, info = trainer.step(action)
+    # Optional - debugging mode (does not render)
+    else:
+        trainer = kaggle_env.train([None, "random"])
+        obs = trainer.reset()
+        done = False
+        while not done:
+            action = my_agent(obs, None, model)
+            obs, reward, done, info = trainer.step(action)
 
+    html_out = kaggle_env.render(mode="html", width=800, height=800)
+    with open("replay.html", "w") as f:
+        f.write(html_out)
 
-html_out = kaggle_env.render(mode="html", width=800, height=800)
-with open("replay.html", "w") as f:
-    f.write(html_out)
-
-print(f"Game finished successfully. Written to replay.html")
+    print(f"Game finished successfully. Written to replay.html")

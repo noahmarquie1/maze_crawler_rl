@@ -7,12 +7,13 @@ from stable_baselines3 import PPO
 import os
 
 ACTION_MAPPING = {
-    0: "JUMP_NORTH",
-    1: "JUMP_SOUTH",
-    2: "JUMP_EAST",
-    3: "JUMP_WEST",
+    0: "NORTH",
+    1: "SOUTH",
+    2: "EAST",
+    3: "WEST",
 }
 
+# Game and RL Agents
 def game_agent(obs, fac_action):
     actions = {}
     for uid, data in obs.robots.items():
@@ -26,6 +27,7 @@ def game_agent(obs, fac_action):
     return actions
 
 
+# Environmnet
 class CrawlEnv(gym.Env):
     def __init__(self):
         super().__init__()
@@ -87,13 +89,13 @@ class CrawlEnv(gym.Env):
 
 if __name__ == "__main__":
     out = "ppo_crawl"
-    if os.path.exists(out + ".zip"):
-        os.remove(out + ".zip")
-
     env = CrawlEnv()
     try:
         agent = PPO("MlpPolicy", env, verbose=1)
-        agent.learn(total_timesteps=int(3e4), log_interval=1, progress_bar=True)
+        agent.learn(total_timesteps=int(1e5), log_interval=1, progress_bar=True)
+        if os.path.exists(out + ".zip"):
+            os.remove(out + ".zip")
+
         agent.save(out)
 
     except Exception as e:

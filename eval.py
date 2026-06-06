@@ -1,18 +1,12 @@
+from constants import ACTION_MAPPING, DEBUG, MODEL_PATH
+
 from stable_baselines3 import PPO
 from agent import CrawlEnv
 from kaggle_environments import make
 
-DEBUG = False
-MODEL_PATH = "ppo_crawl"
-ACTION_MAPPING = {
-    0: "NORTH",
-    1: "SOUTH",
-    2: "EAST",
-    3: "WEST",
-}
-
 # Agent function compatible with Kaggle Environment
 crawl_env = CrawlEnv()
+
 
 def my_agent(obs, config, agent: PPO, timestep=None):
     actions = {}
@@ -32,8 +26,8 @@ def my_agent(obs, config, agent: PPO, timestep=None):
             actions[uid] = "NORTH"
     return actions
 
+
 if __name__ == "__main__":
-    
     # Load model - Ensure it is written
     model = PPO.load(MODEL_PATH)
     kaggle_agent = lambda obs, config: my_agent(obs, config, model)
@@ -41,7 +35,7 @@ if __name__ == "__main__":
 
     # Test agent on single episode
     if not DEBUG:
-        kaggle_env.run(["main.py", "random"])
+        kaggle_env.run([kaggle_agent, "random"])
 
     # Optional - debugging mode (does not render)
     else:
@@ -51,7 +45,6 @@ if __name__ == "__main__":
         while not done:
             action = my_agent(obs, None, model)
             obs, reward, done, info = trainer.step(action)
-
 
     html_out = kaggle_env.render(mode="html", width=800, height=800)
     with open("replay.html", "w") as f:

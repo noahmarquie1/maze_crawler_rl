@@ -1,3 +1,4 @@
+from constants import ACTION_MAPPING
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
@@ -6,12 +7,6 @@ from kaggle_environments.utils import Struct
 from stable_baselines3 import PPO
 import os
 
-ACTION_MAPPING = {
-    0: "NORTH",
-    1: "SOUTH",
-    2: "EAST",
-    3: "WEST",
-}
 
 # Game and RL Agents
 def game_agent(obs, fac_action):
@@ -39,16 +34,18 @@ class CrawlEnv(gym.Env):
         # Observation space is a flattened array of factory state and walls
         #  - factory state: 8 elements
         #  - walls: 400 elements
-        self.observation_space = spaces.Box(low=0, high=1, shape=(20,20,5), dtype=np.float32)
+        self.observation_space = spaces.Box(
+            low=0, high=1, shape=(20, 20, 5), dtype=np.float32
+        )
         self.game_obs = None
 
-        base_env = make("crawl")
-        self.trainer: Struct = base_env.train([None, "random"])
+        self.base_env = make("crawl")
+        self.trainer = self.base_env.train([None, "random"])
 
     def format_obs(self, base_obs, timestep):
         obs = np.zeros((20, 20, 5), dtype=np.float32)
         if "0-0" in base_obs.robots.keys():
-            robot_obs = base_obs.robots['0-0']
+            robot_obs = base_obs.robots["0-0"]
             obs[int(robot_obs[1]), int(robot_obs[2]), 0] = 1
 
         # Walls (10, 20) - first 4 items
@@ -73,15 +70,23 @@ class CrawlEnv(gym.Env):
             reward = -100.0
         else:
             reward = 1.0
-        return self.format_obs(self.game_obs, self.timestep), reward, done, 0, info
+
+        truncated = 0
+        return (
+            self.format_obs(self.game_obs, self.timestep),
+            reward,
+            done,
+            truncated,
+            info,
+        )
 
     def reset(self, seed=None, options=None):
         self.timestep = 0
         self.game_obs = self.trainer.reset()
         return self.format_obs(self.game_obs, self.timestep), {}
 
-    def render(self, mode="human"):
-        self.trainer.render(mode=mode)
+    def render(self, mode="human", width=800, height=800, **kwargs):
+        return self.base_env.render(mode=mode, width=width, height=height, **kwargs)
 
     def close(self):
         self.trainer.close()

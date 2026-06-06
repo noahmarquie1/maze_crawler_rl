@@ -7,6 +7,8 @@ from kaggle_environments.utils import Struct
 from stable_baselines3 import PPO
 import os
 
+from model import CNNFeatureExtractor
+
 
 # Game and RL Agents
 def game_agent(obs, fac_action):
@@ -96,7 +98,12 @@ if __name__ == "__main__":
     out = "ppo_crawl"
     env = CrawlEnv()
     try:
-        agent = PPO("MlpPolicy", env, verbose=1)
+        agent = PPO(
+            "MlpPolicy",
+            env,
+            policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
+            verbose=1,
+        )
         agent.learn(total_timesteps=int(1e5), log_interval=1, progress_bar=True)
         if os.path.exists(out + ".zip"):
             os.remove(out + ".zip")

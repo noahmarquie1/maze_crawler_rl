@@ -1,8 +1,9 @@
 from agent import CrawlEnv
-from main import MODEL_PATH
 from stable_baselines3 import PPO
 from agent import CrawlEnv
 from kaggle_environments import make
+
+from constants import MODEL_PATH
 
 
 def run_episode(env: CrawlEnv, model: PPO):

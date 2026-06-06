@@ -1,18 +1,12 @@
+from constants import ACTION_MAPPING, DEBUG, MODEL_PATH
+
 from stable_baselines3 import PPO
 from agent import CrawlEnv
 from kaggle_environments import make
 
-DEBUG = False
-MODEL_PATH = "ppo_crawl"
-ACTION_MAPPING = {
-    0: "JUMP_NORTH",
-    1: "JUMP_SOUTH",
-    2: "JUMP_EAST",
-    3: "JUMP_WEST",
-}
-
 # Agent function compatible with Kaggle Environment
 crawl_env = CrawlEnv()
+
 
 def my_agent(obs, config, agent: PPO, timestep=None):
     actions = {}

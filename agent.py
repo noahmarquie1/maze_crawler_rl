@@ -37,8 +37,8 @@ class CrawlEnv(gym.Env):
         )
         self.game_obs = None
 
-        base_env = make("crawl")
-        self.trainer = base_env.train([None, "random"])
+        self.base_env = make("crawl")
+        self.trainer = self.base_env.train([None, "random"])
 
     def format_obs(self, base_obs, timestep):
         obs = np.zeros((20, 20, 5), dtype=np.float32)
@@ -84,7 +84,7 @@ class CrawlEnv(gym.Env):
         return self.format_obs(self.game_obs, self.timestep), {}
 
     def render(self, mode="human", width=800, height=800, **kwargs):
-        return self.trainer.render(mode=mode, width=width, height=height, **kwargs)
+        return self.base_env.render(mode=mode, width=width, height=height, **kwargs)
 
     def close(self):
         self.trainer.close()

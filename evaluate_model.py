@@ -17,5 +17,3 @@ while not done:
 html_out = crawl_env.render(mode="html", width=800, height=800)
 with open("replay.html", "w") as f:
     f.write(html_out)
-
-print(f"Game finished successfully. Written to replay.html")

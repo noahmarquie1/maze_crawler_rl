@@ -5,13 +5,10 @@ from kaggle_environments import make
 DEBUG = False
 MODEL_PATH = "ppo_crawl"
 ACTION_MAPPING = {
-    0: "BUILD_SCOUT",
-    1: "BUILD_WORKER",
-    2: "BUILD_MINER",
-    3: "JUMP_NORTH",
-    4: "JUMP_SOUTH",
-    5: "JUMP_EAST",
-    6: "JUMP_WEST",
+    0: "JUMP_NORTH",
+    1: "JUMP_SOUTH",
+    2: "JUMP_EAST",
+    3: "JUMP_WEST",
 }
 
 # Agent function compatible with Kaggle Environment

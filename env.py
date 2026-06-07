@@ -3,16 +3,8 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from kaggle_environments import make
-from kaggle_environments.utils import Struct
-from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv
-from stable_baselines3.common.monitor import Monitor
-import os
-
-from model import CNNFeatureExtractor
 
 
-# Game and RL Agents
 def game_agent(obs, fac_action):
     actions = {}
     for uid, data in obs.robots.items():
@@ -26,18 +18,12 @@ def game_agent(obs, fac_action):
     return actions
 
 
-# Environmnet
 class CrawlEnv(gym.Env):
     def __init__(self):
         super().__init__()
-        # Action space is:
-        # - DIFFERENT DIRECTIONS JUMPING
         self.action_space = spaces.Discrete(4)
         self.timestep: int = 0
 
-        # Observation space is a flattened array of factory state and walls
-        #  - factory state: 8 elements
-        #  - walls: 400 elements
         self.observation_space = spaces.Box(
             low=0, high=1, shape=(5, 20, 20), dtype=np.float32
         )
@@ -90,30 +76,3 @@ class CrawlEnv(gym.Env):
 
     def close(self):
         pass
-
-
-if __name__ == "__main__":
-    out = "ppo_crawl"
-    n_envs = 8
-    env = SubprocVecEnv([lambda: Monitor(CrawlEnv()) for _ in range(n_envs)])
-    agent = PPO(
-        "MlpPolicy",
-        env,
-        n_steps=512,
-        policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
-        batch_size=128,
-        verbose=1,
-    )
-    try:
-        agent.learn(total_timesteps=int(1e5), log_interval=1, progress_bar=True)
-
-    except Exception as e:
-        raise e
-    finally:
-        if os.path.exists(out + ".zip"):
-            os.remove(out + ".zip")
-        agent.save(out)
-        html_out = env.render(mode="html")
-        if html_out is not None:
-            with open(os.path.join("error_replay.html"), "w") as f:
-                f.write(html_out)

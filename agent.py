@@ -37,7 +37,7 @@ class CrawlEnv(gym.Env):
         #  - factory state: 8 elements
         #  - walls: 400 elements
         self.observation_space = spaces.Box(
-            low=0, high=1, shape=(20, 20, 5), dtype=np.float32
+            low=0, high=1, shape=(5, 20, 20), dtype=np.float32
         )
         self.game_obs = None
 
@@ -45,21 +45,16 @@ class CrawlEnv(gym.Env):
         self.trainer = self.base_env.train([None, "random"])
 
     def format_obs(self, base_obs, timestep):
-        obs = np.zeros((20, 20, 5), dtype=np.float32)
+        # Shape: (C=5, H=20, W=20) — channels-first for PyTorch CNN
+        obs = np.zeros((5, 20, 20), dtype=np.float32)
         if "0-0" in base_obs.robots.keys():
             robot_obs = base_obs.robots["0-0"]
-            obs[int(robot_obs[1]), int(robot_obs[2]), 0] = 1
+            obs[0, int(robot_obs[1]), int(robot_obs[2])] = 1
 
-        # Walls (10, 20) - first 4 items
-        n_walls = np.array([wall == 1 for wall in base_obs.walls]).reshape((20, 20))
-        e_walls = np.array([wall == 2 for wall in base_obs.walls]).reshape((20, 20))
-        s_walls = np.array([wall == 4 for wall in base_obs.walls]).reshape((20, 20))
-        w_walls = np.array([wall == 8 for wall in base_obs.walls]).reshape((20, 20))
-
-        obs[:, :, 1] = n_walls
-        obs[:, :, 2] = e_walls
-        obs[:, :, 3] = s_walls
-        obs[:, :, 4] = w_walls
+        obs[1] = np.array([wall == 1 for wall in base_obs.walls]).reshape((20, 20))
+        obs[2] = np.array([wall == 2 for wall in base_obs.walls]).reshape((20, 20))
+        obs[3] = np.array([wall == 4 for wall in base_obs.walls]).reshape((20, 20))
+        obs[4] = np.array([wall == 8 for wall in base_obs.walls]).reshape((20, 20))
 
         return obs
 

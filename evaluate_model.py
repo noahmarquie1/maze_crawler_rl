@@ -6,6 +6,7 @@ from agent import CrawlEnv
 from kaggle_environments import make
 
 from constants import MODEL_PATH, REPLAY_OUTPUT_DIR
+from model import CNNFeatureExtractor
 
 
 def setup_output_dir():
@@ -29,7 +30,9 @@ if __name__ == "__main__":
 
     crawl_env = CrawlEnv()
 
-    model = PPO.load(MODEL_PATH)
+    model = PPO.load(
+        MODEL_PATH, policy_kwargs=dict(feature_extractor_class=CNNFeatureExtractor)
+    )
     for i in range(EPISODES):
         run_episode(crawl_env, model)
         html_out = crawl_env.render(mode="html", width=800, height=800)

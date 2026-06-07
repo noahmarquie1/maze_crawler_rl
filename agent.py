@@ -50,12 +50,17 @@ class CrawlEnv(gym.Env):
         obs = np.zeros((5, 20, 20), dtype=np.float32)
         if "0-0" in base_obs.robots.keys():
             robot_obs = base_obs.robots["0-0"]
-            obs[0, int(robot_obs[1]), int(robot_obs[2])] = 1
+            try:
+                obs[0, int(robot_obs[1]), int(robot_obs[2])] = 1
+            except Exception as e:
+                print(f"Error processing robot observation: {robot_obs}")
+                raise e
 
-        obs[1] = np.array([wall == 1 for wall in base_obs.walls]).reshape((20, 20))
-        obs[2] = np.array([wall == 2 for wall in base_obs.walls]).reshape((20, 20))
-        obs[3] = np.array([wall == 4 for wall in base_obs.walls]).reshape((20, 20))
-        obs[4] = np.array([wall == 8 for wall in base_obs.walls]).reshape((20, 20))
+        walls = np.array(base_obs.walls, dtype=np.float32).reshape(20, 20)
+        obs[1] = (walls == 1).astype(np.float32)
+        obs[2] = (walls == 2).astype(np.float32)
+        obs[3] = (walls == 4).astype(np.float32)
+        obs[4] = (walls == 8).astype(np.float32)
 
         return obs
 

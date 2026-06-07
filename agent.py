@@ -50,11 +50,7 @@ class CrawlEnv(gym.Env):
         obs = np.zeros((5, 20, 20), dtype=np.float32)
         if "0-0" in base_obs.robots.keys():
             robot_obs = base_obs.robots["0-0"]
-            try:
-                obs[0, int(robot_obs[1]), int(robot_obs[2])] = 1
-            except Exception as e:
-                print(f"Error processing robot observation: {robot_obs}")
-                raise e
+            obs[0, min(int(robot_obs[1]), 19), min(int(robot_obs[2]), 19)] = 1
 
         walls = np.array(base_obs.walls, dtype=np.float32).reshape(20, 20)
         obs[1] = (walls == 1).astype(np.float32)
@@ -105,6 +101,7 @@ if __name__ == "__main__":
             env,
             n_steps=512,
             policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
+            batch_size=128,
             verbose=1,
         )
         agent.learn(total_timesteps=int(1e5), log_interval=1, progress_bar=True)
@@ -114,4 +111,9 @@ if __name__ == "__main__":
         agent.save(out)
 
     except Exception as e:
-        print(e)
+        raise e
+    finally:
+        html_out = env.render(mode="html")
+        if html_out is not None:
+            with open(os.path.join("error_replay.html"), "w") as f:
+                f.write(html_out)

@@ -5,6 +5,7 @@ from gymnasium import spaces
 from kaggle_environments import make
 from kaggle_environments.utils import Struct
 from stable_baselines3 import PPO
+from stable_baselines3.common.vec_env import SubprocVecEnv
 import os
 
 from model import CNNFeatureExtractor
@@ -86,16 +87,18 @@ class CrawlEnv(gym.Env):
         return self.base_env.render(mode=mode, width=width, height=height, **kwargs)
 
     def close(self):
-        self.trainer.close()
+        pass
 
 
 if __name__ == "__main__":
     out = "ppo_crawl"
-    env = CrawlEnv()
+    n_envs = 8
+    env = SubprocVecEnv([lambda: CrawlEnv() for _ in range(n_envs)])
     try:
         agent = PPO(
             "MlpPolicy",
             env,
+            n_steps=512,
             policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
             verbose=1,
         )

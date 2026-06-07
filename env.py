@@ -5,6 +5,17 @@ from gymnasium import spaces
 from kaggle_environments import make
 
 
+def debug_agent(obs, config):
+    actions = {}
+    for uid, data in obs.robots.items():
+        rtype, col, row, energy, owner = data[0], data[1], data[2], data[3], data[4]
+        if owner != obs.player:
+            continue
+        actions[uid] = "JUMP_NORTH"
+
+    return actions
+
+
 def game_agent(obs, fac_action):
     actions = {}
     for uid, data in obs.robots.items():
@@ -21,7 +32,7 @@ def game_agent(obs, fac_action):
 class CrawlEnv(gym.Env):
     def __init__(self):
         super().__init__()
-        self.action_space = spaces.Discrete(4)
+        self.action_space = spaces.Discrete(8)
         self.timestep: int = 0
 
         self.observation_space = spaces.Box(
@@ -30,7 +41,7 @@ class CrawlEnv(gym.Env):
         self.game_obs = None
 
         self.base_env = make("crawl")
-        self.trainer = self.base_env.train([None, "random"])
+        self.trainer = self.base_env.train([None, debug_agent])
 
     def format_obs(self, base_obs, timestep):
         # Shape: (C=5, H=20, W=20) — channels-first for PyTorch CNN

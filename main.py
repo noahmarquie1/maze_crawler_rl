@@ -2,14 +2,23 @@ import os
 
 from constants import *
 from kaggle_environments import make
-from env import CrawlEnv
+from env import CrawlEnv, debug_agent
 import numpy as np
 import torch
 from torch import nn
 
-# Basic RL Setup
+# Config
+OBS_DIM = 20*20*5
+ACTION_DIM = 8
 rl_env = CrawlEnv()
 
+if __name__ == "__main__":
+    BASE_DIR = ""
+else:
+    BASE_DIR = "/kaggle_simulations/agent"
+
+
+# RL Classes
 class PolicyNetwork(nn.Module):
     def __init__(self, obs_dim, action_dim, net_arch=None):
         net_arch = net_arch or [64, 64]
@@ -34,8 +43,7 @@ class PolicyNetwork(nn.Module):
     
 
 # Custom RL Setup
-BASE_DIR = "/kaggle_simulations/agent"
-policy = PolicyNetwork(obs_dim=2000, action_dim=4)
+policy = PolicyNetwork(obs_dim=OBS_DIM, action_dim=ACTION_DIM)
 policy.load_state_dict(
     torch.load(os.path.join(BASE_DIR, "policy_weights.pt")), 
     strict=False
@@ -68,7 +76,7 @@ def agent(obs, config): # Main kaggle agent
 # Main Loop - for Debugging
 if __name__ == "__main__":
     kaggle_env = make("crawl", configuration={"randomSeed": 42})
-    kaggle_env.run([agent, "random"])
+    kaggle_env.run([agent, debug_agent])
 
     html_out = kaggle_env.render(mode="html", width=800, height=800)
     with open("replay.html", "w") as f:

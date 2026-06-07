@@ -6,4 +6,8 @@ ACTION_MAPPING = {
     1: "SOUTH",
     2: "EAST",
     3: "WEST",
+    4: "JUMP_NORTH",
+    5: "JUMP_SOUTH",
+    6: "JUMP_EAST",
+    7: "JUMP_WEST",
 }

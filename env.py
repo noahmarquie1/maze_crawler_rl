@@ -1,21 +1,29 @@
-import numpy as np
+from constants import ACTION_MAPPING
 import gymnasium as gym
+import numpy as np
 from gymnasium import spaces
 from kaggle_environments import make
-from constants import *
-from agent import game_agent
+
+
+def game_agent(obs, fac_action):
+    actions = {}
+    for uid, data in obs.robots.items():
+        rtype, col, row, energy, owner = data[0], data[1], data[2], data[3], data[4]
+        if owner != obs.player:
+            continue
+        if rtype == 0:  # Factory
+            actions[uid] = fac_action
+        else:
+            actions[uid] = "NORTH"
+    return actions
+
 
 class CrawlEnv(gym.Env):
     def __init__(self):
         super().__init__()
-        # Action space is:
-        # - DIFFERENT DIRECTIONS JUMPING
         self.action_space = spaces.Discrete(4)
         self.timestep: int = 0
 
-        # Observation space is a flattened array of factory state and walls
-        #  - factory state: 8 elements
-        #  - walls: 400 elements
         self.observation_space = spaces.Box(
             low=0, high=1, shape=(5, 20, 20), dtype=np.float32
         )
@@ -29,12 +37,13 @@ class CrawlEnv(gym.Env):
         obs = np.zeros((5, 20, 20), dtype=np.float32)
         if "0-0" in base_obs.robots.keys():
             robot_obs = base_obs.robots["0-0"]
-            obs[0, int(robot_obs[1]), int(robot_obs[2])] = 1
+            obs[0, min(int(robot_obs[1]), 19), min(int(robot_obs[2]), 19)] = 1
 
-        obs[1] = np.array([wall == 1 for wall in base_obs.walls]).reshape((20, 20))
-        obs[2] = np.array([wall == 2 for wall in base_obs.walls]).reshape((20, 20))
-        obs[3] = np.array([wall == 4 for wall in base_obs.walls]).reshape((20, 20))
-        obs[4] = np.array([wall == 8 for wall in base_obs.walls]).reshape((20, 20))
+        walls = np.array(base_obs.walls, dtype=np.float32).reshape(20, 20)
+        obs[1] = (walls == 1).astype(np.float32)
+        obs[2] = (walls == 2).astype(np.float32)
+        obs[3] = (walls == 4).astype(np.float32)
+        obs[4] = (walls == 8).astype(np.float32)
 
         return obs
 
@@ -66,4 +75,4 @@ class CrawlEnv(gym.Env):
         return self.base_env.render(mode=mode, width=width, height=height, **kwargs)
 
     def close(self):
-        self.trainer.close()
+        pass

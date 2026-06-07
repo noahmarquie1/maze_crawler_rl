@@ -1,6 +1,8 @@
+import os
+
 from constants import *
 from kaggle_environments import make
-from agent import CrawlEnv
+from env import CrawlEnv
 import numpy as np
 import torch
 from torch import nn
@@ -32,8 +34,12 @@ class PolicyNetwork(nn.Module):
     
 
 # Custom RL Setup
+BASE_DIR = "/kaggle_simulations/agent"
 policy = PolicyNetwork(obs_dim=2000, action_dim=4)
-policy.load_state_dict(torch.load("policy_weights.pt"), strict=False)
+policy.load_state_dict(
+    torch.load(os.path.join(BASE_DIR, "policy_weights.pt")), 
+    strict=False
+)
 policy.eval()
 
 

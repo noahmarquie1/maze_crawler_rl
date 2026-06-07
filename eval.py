@@ -3,6 +3,7 @@ from constants import ACTION_MAPPING, DEBUG, MODEL_PATH
 from stable_baselines3 import PPO
 from agent import CrawlEnv
 from kaggle_environments import make
+import torch
 
 # Agent function compatible with Kaggle Environment
 crawl_env = CrawlEnv()
@@ -30,6 +31,7 @@ def my_agent(obs, config, agent: PPO, timestep=None):
 if __name__ == "__main__":
     # Load model - Ensure it is written
     model = PPO.load(MODEL_PATH)
+    torch.save(model.policy.state_dict(), "policy_weights.pt")
     kaggle_agent = lambda obs, config: my_agent(obs, config, model)
     kaggle_env = make("crawl", configuration={"randomSeed": 42})
 

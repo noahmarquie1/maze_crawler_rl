@@ -1,7 +1,7 @@
 from constants import ACTION_MAPPING, DEBUG, MODEL_PATH
 
 from stable_baselines3 import PPO
-from agent import CrawlEnv
+from env import CrawlEnv
 from kaggle_environments import make
 
 # Agent function compatible with Kaggle Environment

@@ -1,8 +1,8 @@
 import os
 
-from agent import CrawlEnv
+from env import CrawlEnv
 from stable_baselines3 import PPO
-from agent import CrawlEnv
+from env import CrawlEnv
 from kaggle_environments import make
 
 from constants import MODEL_PATH, REPLAY_OUTPUT_DIR

@@ -71,10 +71,19 @@ class CrawlEnv(gym.Env):
         agent_action = ACTION_MAPPING[action]
         game_action = game_agent(self.game_obs, agent_action)
         self.game_obs, _, done, info = self.trainer.step(game_action)
+        reward = 0
         if done:
-            reward = -100.0
+            reward -= 100.0
         else:
-            reward = 1.0
+            reward += 1.0
+
+        for uid, data in self.game_obs.robots.items():
+            rtype, col, row, energy, owner = data[0], data[1], data[2], data[3], data[4]
+            if owner != self.game_obs.player:
+                continue
+            is_close_to_bottom = row - self.game_obs.southBound < 3
+            if rtype == 0 and is_close_to_bottom:  # Factory
+                reward -= 2.0
 
         truncated = 0
         return (

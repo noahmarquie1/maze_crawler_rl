@@ -1,3 +1,6 @@
+from collections import deque
+
+import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
@@ -12,6 +15,57 @@ from env import CrawlEnv
 
 from model import CNNFeatureExtractor
 from evaluate_model import run_n_episodes
+
+
+class GameMetricsCallback(BaseCallback):
+    def __init__(self, window_size: int = 100):
+        super().__init__()
+        self.outcomes = deque(maxlen=window_size)
+        self.score_margins = deque(maxlen=window_size)
+        self.episode_lengths = deque(maxlen=window_size)
+        self.completed_episodes = 0
+
+    def _on_step(self) -> bool:
+        for done, info in zip(self.locals["dones"], self.locals["infos"]):
+            if not done or "outcome" not in info:
+                continue
+
+            outcome = info["outcome"]
+            self.outcomes.append(outcome)
+            self.completed_episodes += 1
+
+            final_scores = info.get("final_scores")
+            if final_scores is not None:
+                self.score_margins.append(final_scores[0] - final_scores[1])
+
+            episode = info.get("episode")
+            if episode is not None:
+                self.episode_lengths.append(episode["l"])
+
+        if self.outcomes:
+            self.logger.record(
+                "game/win_rate",
+                np.mean([outcome == "win" for outcome in self.outcomes]),
+            )
+            self.logger.record(
+                "game/draw_rate",
+                np.mean([outcome == "draw" for outcome in self.outcomes]),
+            )
+            self.logger.record(
+                "game/loss_rate",
+                np.mean([outcome == "loss" for outcome in self.outcomes]),
+            )
+            self.logger.record("game/episodes", self.completed_episodes)
+
+        if self.score_margins:
+            self.logger.record("game/mean_score_margin", np.mean(self.score_margins))
+
+        if self.episode_lengths:
+            self.logger.record(
+                "game/mean_episode_length", np.mean(self.episode_lengths)
+            )
+
+        return True
 
 
 class EvalCallback(BaseCallback):
@@ -39,7 +93,9 @@ if __name__ == "__main__":
     CHECKPOINT_FILE = "ppo_crawl.zip"
     out = "ppo_crawl"
     checkpoint_dir = "checkpoints"
+    tensorboard_log_dir = "logs/tensorboard"
     os.makedirs(checkpoint_dir, exist_ok=True)
+    os.makedirs(tensorboard_log_dir, exist_ok=True)
 
     n_envs = 32
     n_envs = 8
@@ -47,7 +103,11 @@ if __name__ == "__main__":
 
     checkpoint_exists = USE_CHECKPOINT and os.path.exists(CHECKPOINT_FILE)
     if checkpoint_exists:
-        agent = PPO.load(CHECKPOINT_FILE, env=env)
+        agent = PPO.load(
+            CHECKPOINT_FILE,
+            env=env,
+            tensorboard_log=tensorboard_log_dir,
+        )
         print(f"Resuming from {CHECKPOINT_FILE}")
 
     else:
@@ -57,6 +117,7 @@ if __name__ == "__main__":
             n_steps=512,
             policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
             batch_size=128,
+            tensorboard_log=tensorboard_log_dir,
             verbose=1,
         )
 
@@ -67,17 +128,19 @@ if __name__ == "__main__":
                 save_path=checkpoint_dir,
                 name_prefix=out,
             ),
+            GameMetricsCallback(window_size=100),
             EvalCallback(eval_freq=100_000),
         ]
     )
 
     try:
         agent.learn(
-            total_timesteps=int(1e5),
+            total_timesteps=int(3e6),
             log_interval=1,
             progress_bar=True,
             callback=callbacks,
             reset_num_timesteps=not checkpoint_exists,
+            tb_log_name="crawl_ppo",
         )
 
     except Exception as e:

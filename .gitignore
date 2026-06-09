@@ -5,3 +5,4 @@ output_replays
 error_replay.html
 checkpoints
 eval_replays
+archive_eval_replays

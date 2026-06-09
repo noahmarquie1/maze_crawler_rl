@@ -1,4 +1,4 @@
-from constants import ACTION_MAPPING
+from constants import ACTION_MAPPING, MAX_HEIGHT_REWARD
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
@@ -116,7 +116,11 @@ class CrawlEnv(gym.Env):
 
         curr_factory_obs = self.game_obs.robots.get("0-0", None)
         if curr_factory_obs is not None:
+            board_height = 20
             row = curr_factory_obs[2]
+            relative_height = (row - self.game_obs.southBound) / board_height
+            reward += MAX_HEIGHT_REWARD * relative_height
+
             is_close_to_bottom = row - self.game_obs.southBound < 3
             if is_close_to_bottom:
                 reward -= 2.0

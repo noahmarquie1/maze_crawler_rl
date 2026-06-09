@@ -83,7 +83,20 @@ class CrawlEnv(gym.Env):
 
         reward = 0
         if done:
-            reward -= 100.0
+            our_score = self.base_env.state[0].reward
+            opponent_score = self.base_env.state[1].reward
+
+            if our_score > opponent_score:
+                reward += 100.0
+                outcome = "win"
+            elif our_score < opponent_score:
+                reward -= 100.0
+                outcome = "loss"
+            else:
+                outcome = "draw"
+
+            info["outcome"] = outcome
+            info["final_scores"] = [our_score, opponent_score]
         else:
             reward += 1.0
 

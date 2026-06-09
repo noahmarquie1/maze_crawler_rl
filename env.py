@@ -33,8 +33,12 @@ class CrawlEnv(gym.Env):
         self.observation_space = spaces.Dict(
             {
                 "spatial": spaces.Box(0, 1, shape=(5, 20, 20)),
-                # Stats is: 1. Energy [0 to 5]
-                "stats": spaces.Box(0, 5, shape=(1,)),
+                # Stats: energy, move cooldown, jump cooldown
+                "stats": spaces.Box(
+                    low=np.zeros(3, dtype=np.float32),
+                    high=np.array([5, 2, 20], dtype=np.float32),
+                    dtype=np.float32,
+                ),
             }
         )
 
@@ -47,7 +51,7 @@ class CrawlEnv(gym.Env):
         # Shape: (C=5, H=20, W=20) — channels-first for PyTorch CNN
         obs = {
             "spatial": np.zeros((5, 20, 20), dtype=np.float32),
-            "stats": np.zeros((1,), dtype=np.float32),
+            "stats": np.zeros((3,), dtype=np.float32),
         }
         if "0-0" in base_obs.robots.keys():
             robot_obs = base_obs.robots["0-0"]
@@ -56,7 +60,10 @@ class CrawlEnv(gym.Env):
                 min(int(robot_obs[2]) - int(base_obs.southBound), 19),  # row
                 min(int(robot_obs[1]), 19),  # col
             ] = 1
-            obs["stats"] = np.array([robot_obs[3] / 1000], dtype=np.float32)
+            obs["stats"] = np.array(
+                [robot_obs[3] / 1000, robot_obs[5], robot_obs[6]],
+                dtype=np.float32,
+            )
 
         walls = np.array(base_obs.walls, dtype=np.int8).reshape(20, 20)
         obs["spatial"][1] = ((walls & 1) != 0).astype(np.float32)
@@ -70,19 +77,29 @@ class CrawlEnv(gym.Env):
         self.timestep += 1
         agent_action = ACTION_MAPPING[action]
         game_action = game_agent(self.game_obs, agent_action)
+
+        prev_game_obs = self.game_obs
         self.game_obs, _, done, info = self.trainer.step(game_action)
+
         reward = 0
         if done:
             reward -= 100.0
         else:
             reward += 1.0
 
-        for uid, data in self.game_obs.robots.items():
-            rtype, col, row, energy, owner = data[0], data[1], data[2], data[3], data[4]
-            if owner != self.game_obs.player:
-                continue
+        # Penalize Invalid Moves
+        prev_factory_obs = prev_game_obs.robots.get("0-0", None)
+        if prev_factory_obs is not None:
+            # prev_move_cd = prev_factory_obs[5]
+            prev_jump_cooldown = prev_factory_obs[6]
+            if agent_action.startswith("JUMP") and prev_jump_cooldown > 0:
+                reward -= 5.0
+
+        curr_factory_obs = self.game_obs.robots.get("0-0", None)
+        if curr_factory_obs is not None:
+            row = curr_factory_obs[2]
             is_close_to_bottom = row - self.game_obs.southBound < 3
-            if rtype == 0 and is_close_to_bottom:  # Factory
+            if is_close_to_bottom:
                 reward -= 2.0
 
         truncated = 0

@@ -35,7 +35,7 @@ def run_n_episodes(env: CrawlEnv, model: PPO, n: int, output_dir: str = None):
         if html_out is not None:
             with open(os.path.join(replay_dir, f"replay_{i}.html"), "w") as f:
                 f.write(html_out)
-                print("Episode {i} finished. Written to replay_{i}.html")
+                print(f"Episode {i} finished. Written to replay_{i}.html")
 
 
 if __name__ == "__main__":

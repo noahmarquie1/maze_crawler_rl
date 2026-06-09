@@ -35,9 +35,15 @@ class CrawlEnv(gym.Env):
         self.action_space = spaces.Discrete(8)
         self.timestep: int = 0
 
-        self.observation_space = spaces.Box(
-            low=0, high=1, shape=(5, 20, 20), dtype=np.float32
-        )
+        #self.observation_space = spaces.Box(
+        #    low=0, high=1, shape=(5, 20, 20), dtype=np.float32
+        #)
+
+        self.observation_space = spaces.Dict({
+            "spatial": spaces.Box(0, 1, shape=(5, 20, 20)),
+            "energy": spaces.Box(0, 5, shape=(1,)),
+        })
+
         self.game_obs = None
 
         self.base_env = make("crawl")
@@ -45,16 +51,19 @@ class CrawlEnv(gym.Env):
 
     def format_obs(self, base_obs, timestep):
         # Shape: (C=5, H=20, W=20) — channels-first for PyTorch CNN
-        obs = np.zeros((5, 20, 20), dtype=np.float32)
+        obs = {
+            "spatial": np.zeros((5, 20, 20), dtype=np.float32),
+        }
         if "0-0" in base_obs.robots.keys():
             robot_obs = base_obs.robots["0-0"]
-            obs[0, min(int(robot_obs[1]), 19), min(int(robot_obs[2]), 19)] = 1
+            obs["spatial"][0, int(robot_obs[1]) - 0, int(robot_obs[2]) - 0] = 1
+            obs["energy"] = np.array([ base_obs.robots['0-0'][3] / 1000])
 
         walls = np.array(base_obs.walls, dtype=np.float32).reshape(20, 20)
-        obs[1] = (walls == 1).astype(np.float32)
-        obs[2] = (walls == 2).astype(np.float32)
-        obs[3] = (walls == 4).astype(np.float32)
-        obs[4] = (walls == 8).astype(np.float32)
+        obs["spatial"][1] = (walls == 1).astype(np.float32)
+        obs["spatial"][2] = (walls == 2).astype(np.float32)
+        obs["spatial"][3] = (walls == 4).astype(np.float32)
+        obs["spatial"][4] = (walls == 8).astype(np.float32)
 
         return obs
 

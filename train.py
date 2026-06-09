@@ -9,10 +9,10 @@ from model import CNNFeatureExtractor
 
 if __name__ == "__main__":
     out = "ppo_crawl"
-    n_envs = 32
+    n_envs = 8
     env = SubprocVecEnv([lambda: Monitor(CrawlEnv()) for _ in range(n_envs)])
     agent = PPO(
-        "MlpPolicy",
+        "MultiInputPolicy",
         env,
         n_steps=512,
         #policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
@@ -20,7 +20,7 @@ if __name__ == "__main__":
         verbose=1,
     )
     try:
-        agent.learn(total_timesteps=int(4e5), log_interval=1, progress_bar=True)
+        agent.learn(total_timesteps=int(1e4), log_interval=1, progress_bar=True)
 
     except Exception as e:
         raise e

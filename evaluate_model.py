@@ -17,30 +17,35 @@ def setup_output_dir():
 
 
 def run_episode(env: CrawlEnv, model: PPO):
-    obs, _ = crawl_env.reset()
+    obs, _ = env.reset()
 
     done = False
     while not done:
         action, _ = model.predict(obs)
-        obs, reward, done, truncated, info = crawl_env.step(action.item())
+        obs, reward, done, truncated, info = env.step(action.item())
 
 
-if __name__ == "__main__":
-    EPISODES = 5
-
-    crawl_env = CrawlEnv()
-
-    model = PPO.load(
-        MODEL_PATH, policy_kwargs=dict(feature_extractor_class=CNNFeatureExtractor)
-    )
-    for i in range(EPISODES):
-        run_episode(crawl_env, model)
-        html_out = crawl_env.render(mode="html", width=800, height=800)
-
-        replay_dir = setup_output_dir()
+def run_n_episodes(env: CrawlEnv, model: PPO, n: int, output_dir: str = None):
+    replay_dir = output_dir if output_dir is not None else setup_output_dir()
+    os.makedirs(replay_dir, exist_ok=True)
+    for i in range(n):
+        run_episode(env, model)
+        html_out = env.render(mode="html", width=800, height=800)
 
         if html_out is not None:
             with open(os.path.join(replay_dir, f"replay_{i}.html"), "w") as f:
                 f.write(html_out)
+
+
+if __name__ == "__main__":
+    EPISODES = 10
+
+    crawl_env = CrawlEnv()
+
+    model = PPO.load(
+        MODEL_PATH,
+        policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
+    )
+    run_n_episodes(crawl_env, model, EPISODES)
 
     print(f"Evaluation Finished successfully.")

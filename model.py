@@ -1,6 +1,6 @@
-import torch.nn as nn
-import torch
 import gymnasium as gym
+import torch
+import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
 
@@ -9,11 +9,11 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
         super(CNNFeatureExtractor, self).__init__(observation_space, features_dim)
 
         self.cnn = nn.Sequential(
-            nn.LazyConv2d(32, kernel_size=3, stride=1, padding=1),
+            nn.LazyConv2d(8, kernel_size=3, stride=1, padding=1),  # (8, 20, 20)
             nn.ReLU(),
-            nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1),
+            nn.LazyConv2d(16, kernel_size=3, stride=1, padding=1),  # (16, 20, 20)
             nn.ReLU(),
-            nn.LazyConv2d(64, kernel_size=3, stride=1),
+            nn.LazyConv2d(16, kernel_size=3, stride=1),  # (16, 18, 18)
             nn.ReLU(),
             nn.Flatten(),
         )

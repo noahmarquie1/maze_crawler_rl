@@ -5,13 +5,22 @@ from gymnasium import spaces
 from kaggle_environments import make
 
 
-def debug_agent(obs, config):
+def decision_tree_opponent(obs, config):
     actions = {}
+    walls = obs.walls  # flat 400-element list, row-major: walls[row * 20 + col]
+
     for uid, data in obs.robots.items():
-        rtype, col, row, energy, owner = data[0], data[1], data[2], data[3], data[4]
+        rtype, col, row, energy, owner = int(data[0]), int(data[1]), int(data[2]), data[3], data[4]
+
         if owner != obs.player:
             continue
-        actions[uid] = "JUMP_NORTH"
+        if rtype != 0:  # only factory acts
+            continue
+        if row == 19:  # at top edge, do nothing
+            continue
+
+        has_north_wall = bool(walls[row * 20 + col] & 1)
+        actions[uid] = "JUMP_NORTH" if has_north_wall else "NORTH"
 
     return actions
 
@@ -47,7 +56,7 @@ class CrawlEnv(gym.Env):
         self.game_obs = None
 
         self.base_env = make("crawl")
-        self.trainer = self.base_env.train([None, debug_agent])
+        self.trainer = self.base_env.train([None, decision_tree_opponent])
 
     def format_obs(self, base_obs, timestep):
         # Shape: (C=5, H=20, W=20) — channels-first for PyTorch CNN

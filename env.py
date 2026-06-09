@@ -10,7 +10,13 @@ def decision_tree_opponent(obs, config):
     walls = obs.walls  # flat 400-element list, row-major: walls[row * 20 + col]
 
     for uid, data in obs.robots.items():
-        rtype, col, row, energy, owner = int(data[0]), int(data[1]), int(data[2]), data[3], data[4]
+        rtype, col, row, energy, owner = (
+            int(data[0]),
+            int(data[1]),
+            int(data[2]),
+            data[3],
+            data[4],
+        )
 
         if owner != obs.player:
             continue
@@ -44,15 +50,17 @@ class CrawlEnv(gym.Env):
         self.action_space = spaces.Discrete(8)
         self.timestep: int = 0
 
-        #self.observation_space = spaces.Box(
+        # self.observation_space = spaces.Box(
         #    low=0, high=1, shape=(5, 20, 20), dtype=np.float32
-        #)
+        # )
 
-        self.observation_space = spaces.Dict({
-            "spatial": spaces.Box(0, 1, shape=(5, 20, 20)),
-            # Stats is: 1. Energy [0 to 5]
-            "stats": spaces.Box(0, 5, shape=(1,)),
-        })
+        self.observation_space = spaces.Dict(
+            {
+                "spatial": spaces.Box(0, 1, shape=(5, 20, 20)),
+                # Stats is: 1. Energy [0 to 5]
+                "stats": spaces.Box(0, 5, shape=(1,)),
+            }
+        )
 
         self.game_obs = None
 
@@ -63,12 +71,12 @@ class CrawlEnv(gym.Env):
         # Shape: (C=5, H=20, W=20) — channels-first for PyTorch CNN
         obs = {
             "spatial": np.zeros((5, 20, 20), dtype=np.float32),
-            "energy": np.zeros((1,), dtype=np.float32)
+            "energy": np.zeros((1,), dtype=np.float32),
         }
         if "0-0" in base_obs.robots.keys():
             robot_obs = base_obs.robots["0-0"]
             obs[0, min(int(robot_obs[1]), 19), min(int(robot_obs[2]), 19)] = 1
-            obs["energy"] = np.array([ robot_obs[3] / 1000])
+            obs["energy"] = np.array([robot_obs[3] / 1000])
 
         walls = np.array(base_obs.walls, dtype=np.float32).reshape(20, 20)
         obs["spatial"][1] = (walls == 1).astype(np.float32)

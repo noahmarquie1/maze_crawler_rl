@@ -1,7 +1,11 @@
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
+from stable_baselines3.common.callbacks import (
+    BaseCallback,
+    CallbackList,
+    CheckpointCallback,
+)
 import argparse
 import os
 from env import CrawlEnv
@@ -11,7 +15,9 @@ from evaluate_model import run_n_episodes
 
 
 class EvalCallback(BaseCallback):
-    def __init__(self, eval_freq: int, n_episodes: int = 5, replay_dir: str = "eval_replays"):
+    def __init__(
+        self, eval_freq: int, n_episodes: int = 5, replay_dir: str = "eval_replays"
+    ):
         super().__init__()
         self.eval_freq = eval_freq
         self.n_episodes = n_episodes
@@ -29,6 +35,7 @@ class EvalCallback(BaseCallback):
 
 
 if __name__ == "__main__":
+    USE_CHECKPOINT = False
     CHECKPOINT_FILE = "ppo_crawl.zip"
     out = "ppo_crawl"
     checkpoint_dir = "checkpoints"
@@ -38,7 +45,7 @@ if __name__ == "__main__":
     n_envs = 8
     env = SubprocVecEnv([lambda: Monitor(CrawlEnv()) for _ in range(n_envs)])
 
-    checkpoint_exists = os.path.exists(CHECKPOINT_FILE)
+    checkpoint_exists = USE_CHECKPOINT and os.path.exists(CHECKPOINT_FILE)
     if checkpoint_exists:
         agent = PPO.load(CHECKPOINT_FILE, env=env)
         print(f"Resuming from {CHECKPOINT_FILE}")
@@ -53,14 +60,16 @@ if __name__ == "__main__":
             verbose=1,
         )
 
-    callbacks = CallbackList([
-        CheckpointCallback(
-            save_freq=50_000 // n_envs,
-            save_path=checkpoint_dir,
-            name_prefix=out,
-        ),
-        EvalCallback(eval_freq=100_000),
-    ])
+    callbacks = CallbackList(
+        [
+            CheckpointCallback(
+                save_freq=50_000 // n_envs,
+                save_path=checkpoint_dir,
+                name_prefix=out,
+            ),
+            EvalCallback(eval_freq=100_000),
+        ]
+    )
 
     try:
         agent.learn(

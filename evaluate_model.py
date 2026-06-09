@@ -38,7 +38,7 @@ def run_n_episodes(env: CrawlEnv, model: PPO, n: int, output_dir: str = None):
 
 
 if __name__ == "__main__":
-    EPISODES = 5
+    EPISODES = 10
 
     crawl_env = CrawlEnv()
 

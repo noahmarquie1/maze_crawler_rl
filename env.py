@@ -1,4 +1,4 @@
-from constants import ACTION_MAPPING
+from constants import FACTORY_MAPPING, SCOUT_MAPPING, WORKER_MAPPING, MINER_MAPPING
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
@@ -25,23 +25,34 @@ def decision_tree_opponent(obs, config):
     return actions
 
 
-def game_agent(obs, fac_action):
+def game_agent(obs, agent_action): # Obs should be formatted already
     actions = {}
+
     for uid, data in obs.robots.items():
         rtype, col, row, energy, owner = data[0], data[1], data[2], data[3], data[4]
         if owner != obs.player:
             continue
-        if rtype == 0:  # Factory
-            actions[uid] = fac_action
+
+        action = agent_action[row * 20 + col]
+        mappings = {
+            0: FACTORY_MAPPING,
+            1: SCOUT_MAPPING,
+            2: WORKER_MAPPING,
+            3: MINER_MAPPING,
+        }
+
+        if action in mappings[rtype].keys():
+            actions[uid] = mappings[rtype][action]
         else:
-            actions[uid] = "NORTH"
+            actions[uid] = "IDLE"
+
     return actions
 
 
 class CrawlEnv(gym.Env):
     def __init__(self):
         super().__init__()
-        self.action_space = spaces.Discrete(8)
+        self.action_space = spaces.MultiDiscrete([13] * 400)
         self.timestep: int = 0
 
         #self.observation_space = spaces.Box(
@@ -49,8 +60,10 @@ class CrawlEnv(gym.Env):
         #)
 
         self.observation_space = spaces.Dict({
-            "spatial": spaces.Box(0, 1, shape=(5, 20, 20)),
-            "energy": spaces.Box(0, 5, shape=(1,)),
+            # 0-3, walls n, e, s, w
+            # 4-7, robots factory, scout, worker, miner
+            "spatial": spaces.Box(0, 1, shape=(8, 20, 20)),
+            "stats": spaces.Box(0, 5, shape=(1,)),
         })
 
         self.game_obs = None
@@ -59,28 +72,28 @@ class CrawlEnv(gym.Env):
         self.trainer = self.base_env.train([None, decision_tree_opponent])
 
     def format_obs(self, base_obs, timestep):
-        # Shape: (C=5, H=20, W=20) — channels-first for PyTorch CNN
+        # Shape: (C=8, H=20, W=20) — channels-first for PyTorch CNN
         obs = {
-            "spatial": np.zeros((5, 20, 20), dtype=np.float32),
-            "energy": np.zeros((1,), dtype=np.float32)
+            "spatial": np.zeros((8, 20, 20), dtype=np.float32),
+            "stats": np.zeros((1,), dtype=np.float32)
         }
-        if "0-0" in base_obs.robots.keys():
-            robot_obs = base_obs.robots["0-0"]
-            obs[0, min(int(robot_obs[1]), 19), min(int(robot_obs[2]), 19)] = 1
-            obs["energy"] = np.array([ robot_obs[3] / 1000])
+        for robot, r_vals in base_obs.robots.items():
+            type = r_vals[0]
+            print(type)
+            row = r_vals[2]
+            col = r_vals[1]
+            obs["spatial"][4+type, row - 1, col - 1] = 1
 
         walls = np.array(base_obs.walls, dtype=np.float32).reshape(20, 20)
-        obs["spatial"][1] = (walls == 1).astype(np.float32)
-        obs["spatial"][2] = (walls == 2).astype(np.float32)
-        obs["spatial"][3] = (walls == 4).astype(np.float32)
-        obs["spatial"][4] = (walls == 8).astype(np.float32)
+        obs["spatial"][0] = (walls == 1).astype(np.float32)
+        obs["spatial"][1] = (walls == 2).astype(np.float32)
+        obs["spatial"][2] = (walls == 4).astype(np.float32)
+        obs["spatial"][3] = (walls == 8).astype(np.float32)
 
         return obs
 
     def step(self, action):
-        self.timestep += 1
-        agent_action = ACTION_MAPPING[action]
-        game_action = game_agent(self.game_obs, agent_action)
+        game_action = game_agent(self.game_obs, action)
         self.game_obs, _, done, info = self.trainer.step(game_action)
         if done:
             reward = -100.0

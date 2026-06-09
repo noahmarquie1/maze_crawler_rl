@@ -44,7 +44,13 @@ class CrawlEnv(gym.Env):
 
         self.game_obs = None
 
-        self.base_env = make("crawl")
+        self.base_env = None
+        self.trainer = None
+        self._create_game()
+
+    def _create_game(self, seed=None):
+        configuration = {"randomSeed": int(seed)} if seed is not None else None
+        self.base_env = make("crawl", configuration=configuration)
         self.trainer = self.base_env.train([None, decision_tree_opponent])
 
     def format_obs(self, base_obs, timestep):
@@ -125,9 +131,16 @@ class CrawlEnv(gym.Env):
         )
 
     def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
         self.timestep = 0
+        game_seed = (
+            seed
+            if seed is not None
+            else self.np_random.integers(0, np.iinfo(np.int32).max)
+        )
+        self._create_game(game_seed)
         self.game_obs = self.trainer.reset()
-        return self.format_obs(self.game_obs, self.timestep), {}
+        return self.format_obs(self.game_obs, self.timestep), {"seed": int(game_seed)}
 
     def render(self, mode="human", width=800, height=800, **kwargs):
         return self.base_env.render(mode=mode, width=width, height=height, **kwargs)

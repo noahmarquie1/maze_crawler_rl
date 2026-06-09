@@ -71,12 +71,16 @@ class CrawlEnv(gym.Env):
         # Shape: (C=5, H=20, W=20) — channels-first for PyTorch CNN
         obs = {
             "spatial": np.zeros((5, 20, 20), dtype=np.float32),
-            "energy": np.zeros((1,), dtype=np.float32),
+            "stats": np.zeros((1,), dtype=np.float32),
         }
         if "0-0" in base_obs.robots.keys():
             robot_obs = base_obs.robots["0-0"]
-            obs[0, min(int(robot_obs[1]), 19), min(int(robot_obs[2]), 19)] = 1
-            obs["energy"] = np.array([robot_obs[3] / 1000])
+            obs["spatial"][
+                0,
+                min(int(robot_obs[2]) - int(base_obs.southBound), 19),  # row
+                min(int(robot_obs[1]), 19),  # col
+            ] = 1
+            obs["stats"] = np.array([robot_obs[3] / 1000], dtype=np.float32)
 
         walls = np.array(base_obs.walls, dtype=np.float32).reshape(20, 20)
         obs["spatial"][1] = (walls == 1).astype(np.float32)

@@ -33,7 +33,7 @@ def game_agent(obs, agent_action): # Obs should be formatted already
         if owner != obs.player:
             continue
 
-        action = agent_action[row * 20 + col]
+        action = agent_action[(row - 1) * 20 + (col - 1)]
         mappings = {
             0: FACTORY_MAPPING,
             1: SCOUT_MAPPING,
@@ -71,6 +71,29 @@ class CrawlEnv(gym.Env):
         self.base_env = make("crawl")
         self.trainer = self.base_env.train([None, decision_tree_opponent])
 
+
+    def action_masks(self):
+        mask = np.zeros((400, 13), dtype=bool)
+        mask[:, 0] = True  # "IDLE" always valid 
+
+        type_valid_actions = {
+            0: range(12),  # Factory: 0-11
+            1: range(5),   # Scout: 0-4
+            2: range(13),  # Worker: 0-12
+            3: range(6),   # Miner: 0-5
+        }
+
+        for uid, data in self.game_obs.robots.items():
+            rtype, col, row, energy, owner = int(data[0]), int(data[1]), int(data[2]), data[3], data[4]
+            if owner != self.game_obs.player:
+                continue
+            idx = (row - 1) * 20 + (col - 1)
+            mask[idx, :] = False
+            mask[idx, list(type_valid_actions[rtype])] = True
+
+        return mask.flatten()
+
+
     def format_obs(self, base_obs, timestep):
         # Shape: (C=8, H=20, W=20) — channels-first for PyTorch CNN
         obs = {
@@ -79,7 +102,6 @@ class CrawlEnv(gym.Env):
         }
         for robot, r_vals in base_obs.robots.items():
             type = r_vals[0]
-            print(type)
             row = r_vals[2]
             col = r_vals[1]
             obs["spatial"][4+type, row - 1, col - 1] = 1

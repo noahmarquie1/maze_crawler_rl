@@ -1,4 +1,5 @@
 from stable_baselines3 import PPO
+from sb3_contrib import MaskablePPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
@@ -40,11 +41,11 @@ if __name__ == "__main__":
 
     checkpoint_exists = os.path.exists(CHECKPOINT_FILE)
     if checkpoint_exists:
-        agent = PPO.load(CHECKPOINT_FILE, env=env)
+        agent = MaskablePPO.load(CHECKPOINT_FILE, env=env)
         print(f"Resuming from {CHECKPOINT_FILE}")
 
     else:
-        agent = PPO(
+        agent = MaskablePPO(
             "MultiInputPolicy",
             env,
             n_steps=512,

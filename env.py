@@ -93,7 +93,7 @@ class CrawlEnv(gym.Env):
             # prev_move_cd = prev_factory_obs[5]
             prev_jump_cooldown = prev_factory_obs[6]
             if agent_action.startswith("JUMP") and prev_jump_cooldown > 0:
-                reward -= 5.0
+                reward -= 2.0
 
         curr_factory_obs = self.game_obs.robots.get("0-0", None)
         if curr_factory_obs is not None:

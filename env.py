@@ -82,11 +82,11 @@ class CrawlEnv(gym.Env):
             ] = 1
             obs["stats"] = np.array([robot_obs[3] / 1000], dtype=np.float32)
 
-        walls = np.array(base_obs.walls, dtype=np.float32).reshape(20, 20)
-        obs["spatial"][1] = (walls == 1).astype(np.float32)
-        obs["spatial"][2] = (walls == 2).astype(np.float32)
-        obs["spatial"][3] = (walls == 4).astype(np.float32)
-        obs["spatial"][4] = (walls == 8).astype(np.float32)
+        walls = np.array(base_obs.walls, dtype=np.int8).reshape(20, 20)
+        obs["spatial"][1] = ((walls & 1) != 0).astype(np.float32)
+        obs["spatial"][2] = ((walls & 2) != 0).astype(np.float32)
+        obs["spatial"][3] = ((walls & 4) != 0).astype(np.float32)
+        obs["spatial"][4] = ((walls & 8) != 0).astype(np.float32)
 
         return obs
 

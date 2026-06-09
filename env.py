@@ -50,7 +50,8 @@ class CrawlEnv(gym.Env):
 
         self.observation_space = spaces.Dict({
             "spatial": spaces.Box(0, 1, shape=(5, 20, 20)),
-            "energy": spaces.Box(0, 5, shape=(1,)),
+            # Stats is: 1. Energy [0 to 5]
+            "stats": spaces.Box(0, 5, shape=(1,)),
         })
 
         self.game_obs = None

@@ -4,31 +4,7 @@ import numpy as np
 from gymnasium import spaces
 from kaggle_environments import make
 
-
-def decision_tree_opponent(obs, config):
-    actions = {}
-    walls = obs.walls  # flat 400-element list, row-major: walls[row * 20 + col]
-
-    for uid, data in obs.robots.items():
-        rtype, col, row, energy, owner = (
-            int(data[0]),
-            int(data[1]),
-            int(data[2]),
-            data[3],
-            data[4],
-        )
-
-        if owner != obs.player:
-            continue
-        if rtype != 0:  # only factory acts
-            continue
-        if row == 19:  # at top edge, do nothing
-            continue
-
-        has_north_wall = bool(walls[row * 20 + col] & 1)
-        actions[uid] = "JUMP_NORTH" if has_north_wall else "NORTH"
-
-    return actions
+from opponent import decision_tree_opponent
 
 
 def game_agent(obs, fac_action):

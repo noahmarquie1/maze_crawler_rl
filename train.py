@@ -73,7 +73,7 @@ if __name__ == "__main__":
 
     try:
         agent.learn(
-            total_timesteps=int(1e4),
+            total_timesteps=int(1e5),
             log_interval=1,
             progress_bar=True,
             callback=callbacks,

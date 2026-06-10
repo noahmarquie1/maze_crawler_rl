@@ -2,14 +2,16 @@ import os
 
 from constants import *
 from kaggle_environments import make
-from env import CrawlEnv, debug_agent
+from env import CrawlEnv, game_agent
+from opponent import decision_tree_opponent
 import numpy as np
 import torch
 from torch import nn
 
 # Config
-OBS_DIM = 20*20*5
-ACTION_DIM = 8
+OBS_DIM = 20*20*10 + 4
+ACTION_DIM = 13*400
+
 rl_env = CrawlEnv()
 
 if __name__ == "__main__":
@@ -56,27 +58,40 @@ def rl_agent(obs) -> int:
     obs_tensor = torch.tensor(obs_array, dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
         action_logits = policy(obs_tensor)
-    action = action_logits.argmax(dim=-1).item()
+    action = action_logits.view(400, 13).argmax(dim=-1).numpy()
     return action
 
 
 def agent(obs, config): # Main kaggle agent
-    actions = {}
-    for uid, data in obs.robots.items():
-        rtype, col, row, energy, owner = data[0], data[1], data[2], data[3], data[4]
-        if owner != obs.player:
-            continue
-        if rtype == 0:  
-            actions[uid] = ACTION_MAPPING[rl_agent(rl_env.format_obs(obs, rl_env.timestep))]
-        else:
-            actions[uid] = "NORTH"
-    return actions
+    rl_obs = rl_env.format_obs(obs)
+    flattened_obs = np.append(rl_obs['spatial'].flatten(), rl_obs['stats'], axis=0)
+    agent_action = rl_agent(flattened_obs)
+    return game_agent(obs, agent_action)
 
 
 # Main Loop - for Debugging
+DEBUG = True
+
+
+
 if __name__ == "__main__":
-    kaggle_env = make("crawl", configuration={"randomSeed": 42})
-    kaggle_env.run([agent, debug_agent])
+    from sb3_contrib import MaskablePPO
+    model = MaskablePPO.load("checkpoints/ppo_crawl_179936_steps.zip", env=rl_env)
+    torch.save(model.policy.state_dict(), "policy_weights.pt")
+
+    kaggle_env = make("crawl")
+    if not DEBUG:
+        kaggle_env.run([agent, decision_tree_opponent])
+
+    # Optional - debugging mode (does not render)
+    else:
+        trainer = kaggle_env.train([None, decision_tree_opponent])
+        obs = trainer.reset()
+        done = False
+        while not done:
+            action = agent(obs, None)
+            obs, reward, done, info = trainer.step(action)
+
 
     html_out = kaggle_env.render(mode="html", width=800, height=800)
     with open("replay.html", "w") as f:

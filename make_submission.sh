@@ -1,1 +1,1 @@
-tar -czf submission.tar.gz main.py env.py constants.py policy_weights.pt
+tar -czf submission.tar.gz main.py env.py constants.py opponent.py policy_weights.pt

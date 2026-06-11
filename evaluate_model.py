@@ -22,7 +22,7 @@ def run_episode(env: CrawlEnv, model: PPO):
     done = False
     while not done:
         action, _ = model.predict(obs)
-        obs, reward, done, truncated, info = env.step(action.item())
+        obs, reward, done, truncated, info = env.step(action)
 
 
 def run_n_episodes(env: CrawlEnv, model: PPO, n: int, output_dir: str = None):

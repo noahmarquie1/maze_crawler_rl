@@ -12,7 +12,7 @@ pip install -e .
 
 Train Agent
 ```
-python agent.py
+python train.py
 ```
 
 Run model

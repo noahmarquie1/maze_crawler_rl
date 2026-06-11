@@ -1,18 +1,23 @@
 import os
 
 from constants import *
-from kaggle_environments import make
-from env import CrawlEnv, game_agent
 from opponent import decision_tree_opponent
 import numpy as np
 import torch
 from torch import nn
 from typing import Mapping
+import contextlib
+
+with contextlib.redirect_stdout(open(os.devnull, 'w')), \
+     contextlib.redirect_stderr(open(os.devnull, 'w')):
+    
+    from kaggle_environments import make
+    from env import CrawlEnv, game_agent
+    rl_env = CrawlEnv()
 
 # Config
 OBS_DIM = 20*20*10 + 4
 ACTION_DIM = 13*400
-rl_env = CrawlEnv()
 
 
 # Custom Policy Class
@@ -131,8 +136,9 @@ if __name__ == "__main__":
     #from sb3_contrib import MaskablePPO
     #model = MaskablePPO.load("checkpoints/ppo_crawl_200000_steps.zip", env=rl_env)
     #torch.save(model.policy.state_dict(), "policy_weights.pt")
+    with contextlib.redirect_stdout(open(os.devnull, 'w')):
+        kaggle_env = make("crawl")
 
-    kaggle_env = make("crawl")
     if not DEBUG:
         kaggle_env.run([agent, decision_tree_opponent])
 

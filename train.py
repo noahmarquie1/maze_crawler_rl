@@ -1,16 +1,26 @@
-from sb3_contrib import MaskablePPO
-from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
 import os
-from env import CrawlEnv
 import glob
 import zipfile
 import torch 
 import io
-from evaluate_model import run_n_episodes
-from model import CNNFeatureExtractor
+import contextlib
+import warnings
+from misc.log_stopper import LogStopper
+
+# Constants
+n_envs = 16
+
+
+# Suppress warnings on import
+with LogStopper():
+    from sb3_contrib import MaskablePPO
+    from stable_baselines3.common.vec_env import SubprocVecEnv
+    from stable_baselines3.common.monitor import Monitor
+    from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
+    from model import CNNFeatureExtractor
+    from env import CrawlEnv
+    from evaluate_model import run_n_episodes
+
 
 # Callbacks
 class EvalCallback(BaseCallback):
@@ -67,13 +77,13 @@ def get_latest_checkpoint(checkpoint_dir, prefix):
 
 if __name__ == "__main__":
     USE_CHECKPOINT = True
+
     checkpoint_file = "ppo_crawl.zip"
     out = "ppo_crawl"
     checkpoint_dir = "checkpoints"
     os.makedirs(checkpoint_dir, exist_ok=True)
-    n_envs = 16
-
-    env = SubprocVecEnv([lambda: Monitor(CrawlEnv()) for _ in range(n_envs)])
+    with LogStopper():
+        env = SubprocVecEnv([lambda: Monitor(CrawlEnv()) for _ in range(n_envs)])
     print(f"Num envs: {env.num_envs}")
 
     dir_checkpoint = get_latest_checkpoint(checkpoint_dir, out)
@@ -88,26 +98,24 @@ if __name__ == "__main__":
         agent = MaskablePPO(
             "MultiInputPolicy",
             env,
-            n_steps=1024,
+            n_steps=512,
             batch_size=512,
             policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
             verbose=1,
             tensorboard_log="./agent_logs/"
         )
 
-    callbacks = CallbackList(
-        [
-            CheckpointCallback(
-                save_freq=100_000 // n_envs,
-                save_path=checkpoint_dir,
-                name_prefix=out,
-            ),
-        ]
-    )
+    callbacks = CallbackList([
+        CheckpointCallback(
+            save_freq=50_000 // n_envs,
+            save_path=checkpoint_dir,
+            name_prefix=out,
+        ),
+    ])
 
     try:
         agent.learn(
-            total_timesteps=int(1e4),
+            total_timesteps=int(1e5),
             log_interval=1,
             progress_bar=True,
             callback=callbacks,
@@ -120,4 +128,5 @@ if __name__ == "__main__":
         if os.path.exists(out + ".zip"):
             os.remove(out + ".zip")
         agent.save(out)
+        env.close()
         print(f"Agent saved to {out}.zip - training complete.")

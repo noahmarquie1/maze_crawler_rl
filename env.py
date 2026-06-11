@@ -3,6 +3,8 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from kaggle_environments import make
+import os
+import contextlib
 from opponent import decision_tree_opponent
 
 
@@ -52,15 +54,23 @@ class CrawlEnv(gym.Env):
 
         self.trainer = None
         self.make_trainer_env()
-        self.southBound = 0
 
         self.prev_factory_row = 0
         self.prev_mine_count = 0
         self.prev_robot_count = 0
 
+        self.cardinal = ["NORTH", "EAST", "SOUTH", "WEST"]
+        self.cardinal_bitwise = {
+            "NORTH": 1,
+            "EAST": 2,
+            "SOUTH": 4,
+            "WEST": 8,
+        }
+
 
     def make_trainer_env(self):
-        base_env = make("crawl")
+        with contextlib.redirect_stdout(open(os.devnull, 'w')):
+            base_env = make("crawl")
         self.trainer = base_env.train([None, decision_tree_opponent])
         self.game_obs = self.trainer.reset()
     
@@ -107,13 +117,12 @@ class CrawlEnv(gym.Env):
             # 4. factory jump cd
             "stats": np.zeros((4,), dtype=np.float32)
         }
-        self.southBound = base_obs.southBound
         for robot, robot_obs in base_obs.robots.items():
             if robot_obs[4] != base_obs.player:
                 continue
 
             type = robot_obs[0]
-            row = min(int(robot_obs[2]) - int(self.southBound), 19)
+            row = min(int(robot_obs[2]) - int(base_obs.southBound), 19)
             col = min(int(robot_obs[1]), 19)
             obs["spatial"][4+type, row, col] = 1
 
@@ -123,12 +132,12 @@ class CrawlEnv(gym.Env):
                 obs['stats'][3] = robot_obs[6] / 10
 
         for coord, energy in base_obs.crystals.items():
-            row = min(int(coord.split(",")[1]) - int(self.southBound), 19)
+            row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
             col = min(int(coord.split(",")[0]), 19)
             obs["spatial"][8,row,col] = 1
 
         for coord, info in base_obs.mines.items():
-            row = min(int(coord.split(",")[1]) - int(self.southBound), 19)
+            row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
             col = min(int(coord.split(",")[0]), 19)
             obs["spatial"][9,row,col] = 1
 
@@ -146,111 +155,45 @@ class CrawlEnv(gym.Env):
         return obs
     
 
-    def reward(self, obs, done):
-        if done:
-            return -50.0
+    def reward(self, obs, action, done): 
+        # Obs are formatted how Kaggle provides them
+        # Action follows Kaggle formatting as well
+        reward = 0
+        if done: 
+            reward = -100
+            return reward
+        
+        reward += 1 # Survival
 
-        reward = 0.0
-        player = obs.player
-        southBound = int(obs.southBound)
+        walls = np.array(obs.walls, dtype=np.int8).reshape(20, 20)
+        for robot, robot_obs in obs.robots.items():
+            if robot_obs[4] != obs.player:
+                continue
 
-        # ── Collect current state ──────────────────────────────────────
-        my_robots = {
-            uid: data for uid, data in obs.robots.items()
-            if data[4] == player
-        }
+            row = min(int(robot_obs[2]) - int(obs.southBound), 19)
+            col = min(int(robot_obs[1]), 19)
 
-        factory = my_robots.get("0-0")
-        miners  = {uid: d for uid, d in my_robots.items() if d[0] == 3}
-        scouts  = {uid: d for uid, d in my_robots.items() if d[0] == 1}
-        workers = {uid: d for uid, d in my_robots.items() if d[0] == 2}
-
-        mines   = obs.mines    # dict: "col,row" -> info
-        crystals = obs.crystals  # dict: "col,row" -> energy
-
-        # ── 1. Factory northward progress ─────────────────────────────
-        # Reward moving north (increasing relative row), penalize moving south
-        if factory is not None:
-            factory_row = int(factory[2]) - southBound
-            row_delta = factory_row - self.prev_factory_row
-            reward += row_delta * 3.0
-            self.prev_factory_row = factory_row
-
-            # Survival bonus — just being far north is good
-            reward += factory_row * 0.05
-
-            # Penalty for being close to the southern boundary
-            if factory_row < 3:
-                reward -= 3.0
-
-        # ── 2. Mine rewards ───────────────────────────────────────────
-        mine_count = len(mines)
-
-        # Reward creating new mines, penalize losing them
-        mine_delta = mine_count - self.prev_mine_count
-        reward += mine_delta * 5.0       # big reward for placing a new mine
-        reward += mine_count * 1.0       # ongoing reward for keeping mines alive
-        self.prev_mine_count = mine_count
-
-        # ── 3. Miner proximity to mines ───────────────────────────────
-        # Reward miners for being close to mine locations
-        if miners and mines:
-            mine_coords = [
-                (int(c.split(",")[1]) - southBound, int(c.split(",")[0]))
-                for c in mines.keys()
-            ]
-            for uid, mdata in miners.items():
-                mrow = int(mdata[2]) - southBound
-                mcol = int(mdata[1])
-                # Minimum manhattan distance to any mine
-                min_dist = min(
-                    abs(mrow - mr) + abs(mcol - mc)
-                    for mr, mc in mine_coords
-                )
-                reward += max(0, (10 - min_dist)) * 0.1  # closer = more reward, max 1.0
-
-        # ── 4. Scout/Worker proximity to crystals ─────────────────────
-        if (scouts or workers) and crystals:
-            crystal_coords = [
-                (int(c.split(",")[1]) - southBound, int(c.split(",")[0]))
-                for c in crystals.keys()
-            ]
-            for uid, rdata in {**scouts, **workers}.items():
-                rrow = int(rdata[2]) - southBound
-                rcol = int(rdata[1])
-                min_dist = min(
-                    abs(rrow - cr) + abs(rcol - cc)
-                    for cr, cc in crystal_coords
-                )
-                reward += max(0, (10 - min_dist)) * 0.05  # max 0.5 per robot
-
-        # ── 5. Robot diversity bonus ──────────────────────────────────
-        # Encourage building a balanced team rather than spamming one type
-        robot_count = len(my_robots)
-        robot_delta = robot_count - self.prev_robot_count
-        reward += robot_delta * 2.0   # reward for building new robots
-        self.prev_robot_count = robot_count
-
-        reward += len(miners) * 0.3   # ongoing bonus per miner
-        reward += len(scouts) * 0.1   # smaller bonus per scout
-        reward += len(workers) * 0.2  # medium bonus per worker
-
-        # ── 6. Wall navigation bonus ──────────────────────────────────
-        # Reward scouts for covering new ground — proxy for maze navigation
-        # Uses the northernmost scout row as a signal
-        if scouts:
-            best_scout_row = max(
-                int(d[2]) - southBound for d in scouts.values()
-            )
-            reward += best_scout_row * 0.1
-
+            if robot == "0-0": # Factory
+                if "JUMP" in action[robot]:
+                    reward -= 0.5 # Jumping is costly and should be avoided
+                elif action[robot] in self.cardinal:
+                    if (walls[row, col] & self.cardinal_bitwise[action[robot]]) == 0: # Wall is not in the way
+                        reward += 2 # reward for going in a correct direction
+                        if action[robot] == "NORTH":
+                            reward += 0.25 # extra (small) reward for going north when possible
+                    else:
+                        reward -= 1 # penalty for bumping into a wall
+                elif action[robot] == "IDLE":
+                    reward -= 0.25 # Idle is not the worst thing in the world but unideal, penalized
+        
         return reward
+
 
 
     def step(self, action):
         game_action = game_agent(self.game_obs, action)
         self.game_obs, _, done, info = self.trainer.step(game_action)
-        reward = self.reward(self.game_obs, done)
+        reward = self.reward(self.game_obs, game_action, done)
         self.timestep += 1
 
         truncated = 0
@@ -261,6 +204,7 @@ class CrawlEnv(gym.Env):
             truncated,
             info,
         )
+
 
     def reset(self, seed=None, options=None):
         self.timestep = 0

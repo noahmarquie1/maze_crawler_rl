@@ -3,7 +3,6 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
-import argparse
 import os
 from env import CrawlEnv
 import glob
@@ -11,6 +10,7 @@ import zipfile
 import torch 
 import io
 from evaluate_model import run_n_episodes
+from model import CNNFeatureExtractor
 
 # Callbacks
 class EvalCallback(BaseCallback):
@@ -120,7 +120,4 @@ if __name__ == "__main__":
         if os.path.exists(out + ".zip"):
             os.remove(out + ".zip")
         agent.save(out)
-        html_out = env.render(mode="html")
-        if html_out is not None:
-            with open("error_replay.html", "w") as f:
-                f.write(html_out)
+        print(f"Agent saved to {out}.zip - training complete.")

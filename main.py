@@ -88,7 +88,7 @@ class KaggleActor(nn.Module):
 if __name__ == "__main__":
     BASE_DIR = ""
     from sb3_contrib import MaskablePPO
-    model = MaskablePPO.load("checkpoints/ppo_crawl_1900000_steps.zip", env=rl_env)
+    model = MaskablePPO.load("ppo_crawl.zip", env=rl_env)
     torch.save(model.policy.state_dict(), "policy_weights.pt")
 else:
     BASE_DIR = "/kaggle_simulations/agent"

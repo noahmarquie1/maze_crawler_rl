@@ -2,7 +2,8 @@ from sb3_contrib import MaskablePPO
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
+from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
+from model import CNNFeatureExtractor
 import os
 from env import CrawlEnv
 import glob
@@ -49,9 +50,10 @@ if __name__ == "__main__":
     out = "ppo_crawl"
     checkpoint_dir = "checkpoints"
     os.makedirs(checkpoint_dir, exist_ok=True)
-    n_envs = 8
+    n_envs = 16
 
     env = SubprocVecEnv([lambda: Monitor(CrawlEnv()) for _ in range(n_envs)])
+    print(f"Num envs: {env.num_envs}")
 
     dir_checkpoint = get_latest_checkpoint(checkpoint_dir, out)
     checkpoint_file = dir_checkpoint if not dir_checkpoint is None else checkpoint_file
@@ -65,8 +67,9 @@ if __name__ == "__main__":
         agent = MaskablePPO(
             "MultiInputPolicy",
             env,
-            n_steps=512,
-            batch_size=128,
+            n_steps=1024,
+            batch_size=512,
+            policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
             verbose=1,
             tensorboard_log="./agent_logs/"
         )
@@ -74,7 +77,7 @@ if __name__ == "__main__":
     callbacks = CallbackList(
         [
             CheckpointCallback(
-                save_freq=20_000 // n_envs,
+                save_freq=100_000 // n_envs,
                 save_path=checkpoint_dir,
                 name_prefix=out,
             ),
@@ -83,7 +86,7 @@ if __name__ == "__main__":
 
     try:
         agent.learn(
-            total_timesteps=int(1e5),
+            total_timesteps=int(1e6),
             log_interval=1,
             progress_bar=True,
             callback=callbacks,

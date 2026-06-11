@@ -1,7 +1,11 @@
 from typing import Mapping
 
 from gymnasium import spaces
+from typing import Mapping
+
+from gymnasium import spaces
 import torch
+from torch.nn import functional as F
 from torch.nn import functional as F
 import torch.nn as nn
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
@@ -23,6 +27,7 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
             nn.LazyConv2d(16, kernel_size=3, stride=1, padding=1),  # (16, 20, 20)
             nn.ReLU(),
             nn.LazyConv2d(4, kernel_size=1, stride=1),  # (4, 20, 20)
+            nn.LazyConv2d(4, kernel_size=1, stride=1),  # (4, 20, 20)
             nn.ReLU(),
             nn.Flatten(),
         )
@@ -34,7 +39,15 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
         spatial_shape = spatial_observation_space.shape
         metadata_shape = metadata_observation_space.shape
 
+        spatial_observation_space = observation_space["spatial"]
+        metadata_observation_space = observation_space["stats"]
+        assert isinstance(spatial_observation_space, spaces.Box)
+        assert isinstance(metadata_observation_space, spaces.Box)
+        spatial_shape = spatial_observation_space.shape
+        metadata_shape = metadata_observation_space.shape
+
         with torch.no_grad():
+            sample_input = torch.zeros((1, *spatial_shape))
             sample_input = torch.zeros((1, *spatial_shape))
             cnn_output_dim = self.cnn(sample_input).shape[1]
 
@@ -47,7 +60,17 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
             nn.ReLU(),
         )
 
+        self.cnn_head = nn.Sequential(
+            nn.Linear(cnn_output_dim, cnn_head_dim),
+            nn.ReLU(),
+        )
+        self.metadata_head = nn.Sequential(
+            nn.Linear(metadata_shape[0], metadata_head_dim),
+            nn.ReLU(),
+        )
+
         self.linear = nn.Sequential(
+            nn.Linear(cnn_head_dim + metadata_head_dim, features_dim),
             nn.Linear(cnn_head_dim + metadata_head_dim, features_dim),
             nn.ReLU(),
         )

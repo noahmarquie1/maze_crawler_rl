@@ -41,9 +41,9 @@ class CrawlEnv(gym.Env):
         self.action_space = spaces.MultiDiscrete([13] * 400)
         self.timestep: int = 0
 
-        #self.observation_space = spaces.Box(
+        # self.observation_space = spaces.Box(
         #    low=0, high=1, shape=(5, 20, 20), dtype=np.float32
-        #)
+        # )
 
         self.observation_space = spaces.Dict({
             # 0-3, walls n, e, s, w

@@ -3,7 +3,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
-from model import CNNFeatureExtractor
+import argparse
 import os
 from env import CrawlEnv
 import glob
@@ -14,7 +14,9 @@ from evaluate_model import run_n_episodes
 
 # Callbacks
 class EvalCallback(BaseCallback):
-    def __init__(self, eval_freq: int, n_episodes: int = 5, replay_dir: str = "eval_replays"):
+    def __init__(
+        self, eval_freq: int, n_episodes: int = 5, replay_dir: str = "eval_replays"
+    ):
         super().__init__()
         self.eval_freq = eval_freq
         self.n_episodes = n_episodes
@@ -105,7 +107,7 @@ if __name__ == "__main__":
 
     try:
         agent.learn(
-            total_timesteps=int(1e6),
+            total_timesteps=int(1e4),
             log_interval=1,
             progress_bar=True,
             callback=callbacks,

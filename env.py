@@ -1,133 +1,274 @@
-from constants import ACTION_MAPPING, MAX_HEIGHT_REWARD
+from constants import (
+    FACTORY_MAPPING,
+    SCOUT_MAPPING,
+    WORKER_MAPPING,
+    MINER_MAPPING,
+    MAX_HEIGHT_REWARD,
+    USE_NOAHS_REWARD_FUNC,
+)
 import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from kaggle_environments import make
-
+import os
+import contextlib
 from opponent import decision_tree_opponent
 
 
-def game_agent(obs, fac_action):
+def game_agent(obs, agent_action):
     actions = {}
-    for uid, data in obs.robots.items():
-        rtype, col, row, energy, owner = data[0], data[1], data[2], data[3], data[4]
+
+    for robot, robot_obs in obs.robots.items():
+        rtype = robot_obs[0]
+        owner = robot_obs[4]
+
+        row = min(int(robot_obs[2]) - int(obs.southBound), 19)
+        col = min(int(robot_obs[1]), 19)
+
         if owner != obs.player:
             continue
-        if rtype == 0:  # Factory
-            actions[uid] = fac_action
+
+        action = agent_action[row * 20 + col]
+        mappings = {
+            0: FACTORY_MAPPING,
+            1: SCOUT_MAPPING,
+            2: WORKER_MAPPING,
+            3: MINER_MAPPING,
+        }
+
+        if action in mappings[rtype].keys():
+            actions[robot] = mappings[rtype][action]
         else:
-            actions[uid] = "NORTH"
+            actions[robot] = "IDLE"
+
     return actions
 
 
 class CrawlEnv(gym.Env):
     def __init__(self):
         super().__init__()
-        self.action_space = spaces.Discrete(8)
+        self.action_space = spaces.MultiDiscrete([13] * 400)
         self.timestep: int = 0
 
-        # self.observation_space = spaces.Box(
-        #    low=0, high=1, shape=(5, 20, 20), dtype=np.float32
-        # )
-
-        self.observation_space = spaces.Dict(
-            {
-                "spatial": spaces.Box(0, 1, shape=(5, 20, 20)),
-                # Stats: energy, move cooldown, jump cooldown
-                "stats": spaces.Box(
-                    low=np.zeros(3, dtype=np.float32),
-                    high=np.array([5, 2, 20], dtype=np.float32),
-                    dtype=np.float32,
-                ),
-            }
-        )
+        self.observation_space = spaces.Dict({
+            # 0-3, walls n, e, s, w
+            # 4-7, robots factory, scout, worker, miner
+            "spatial": spaces.Box(0, 1, shape=(10, 20, 20)),
+            "stats": spaces.Box(0, 5, shape=(4,)),
+        })
 
         self.game_obs = None
+        self.prev_game_obs = None
 
         self.base_env = None
         self.trainer = None
-        self._create_game()
+        self.make_trainer_env()
 
-    def _create_game(self, seed=None):
-        configuration = {"randomSeed": int(seed)} if seed is not None else None
-        self.base_env = make("crawl", configuration=configuration)
-        self.trainer = self.base_env.train([None, decision_tree_opponent])
+        self.prev_factory_row = 0
+        self.prev_mine_count = 0
+        self.prev_robot_count = 0
 
-    def format_obs(self, base_obs, timestep):
-        # Shape: (C=5, H=20, W=20) — channels-first for PyTorch CNN
-        obs = {
-            "spatial": np.zeros((5, 20, 20), dtype=np.float32),
-            "stats": np.zeros((3,), dtype=np.float32),
+        self.cardinal = ["NORTH", "EAST", "SOUTH", "WEST"]
+        self.cardinal_bitwise = {
+            "NORTH": 1,
+            "EAST": 2,
+            "SOUTH": 4,
+            "WEST": 8,
         }
-        if "0-0" in base_obs.robots.keys():
-            robot_obs = base_obs.robots["0-0"]
-            obs["spatial"][
-                0,
-                min(int(robot_obs[2]) - int(base_obs.southBound), 19),  # row
-                min(int(robot_obs[1]), 19),  # col
-            ] = 1
-            obs["stats"] = np.array(
-                [robot_obs[3] / 1000, robot_obs[5], robot_obs[6]],
-                dtype=np.float32,
-            )
 
+    def make_trainer_env(self, seed=None):
+        configuration = {"randomSeed": int(seed)} if seed is not None else None
+        with contextlib.redirect_stdout(open(os.devnull, 'w')):
+            self.base_env = make("crawl", configuration=configuration)
+        self.trainer = self.base_env.train([None, decision_tree_opponent])
+        self.game_obs = self.trainer.reset()
+
+    def action_masks(self):
+        mask = np.zeros((400, 13), dtype=bool)
+        mask[:, 0] = True  # "IDLE" always valid
+
+        type_valid_actions = {
+            0: range(12),  # Factory: 0-11
+            1: range(5),   # Scout: 0-4
+            2: range(13),  # Worker: 0-12
+            3: range(6),   # Miner: 0-5
+        }
+
+        for robot, robot_obs in self.game_obs.robots.items():
+            rtype, col, row, energy, owner = int(robot_obs[0]), int(robot_obs[1]), int(robot_obs[2]), robot_obs[3], robot_obs[4]
+            if owner != self.game_obs.player:
+                continue
+
+            row = min(int(robot_obs[2]) - int(self.game_obs.southBound), 19)
+            col = min(int(robot_obs[1]), 19)
+
+            idx = row * 20 + col
+            mask[idx, :] = False
+            mask[idx, list(type_valid_actions[rtype])] = True
+
+        return mask.flatten()
+
+    def format_obs(self, base_obs):
+        # Shape: (C=10, H=20, W=20) — channels-first for PyTorch CNN
+        obs = {
+            # Spatial is:
+            # 1. (0-3) walls
+            # 2. (4-7) robot types
+            # 3. (8) crystals
+            # 4. (9) mines
+            "spatial": np.zeros((10, 20, 20), dtype=np.float32),
+            # Stats are:
+            # 1. factory energy
+            # 2. game timestep
+            # 3. factory move cd
+            # 4. factory jump cd
+            "stats": np.zeros((4,), dtype=np.float32)
+        }
+        for robot, robot_obs in base_obs.robots.items():
+            if robot_obs[4] != base_obs.player:
+                continue
+
+            type = robot_obs[0]
+            row = min(int(robot_obs[2]) - int(base_obs.southBound), 19)
+            col = min(int(robot_obs[1]), 19)
+            obs["spatial"][4+type, row, col] = 1
+
+            if robot == "0-0":
+                obs['stats'][0] = robot_obs[3] / 1000
+                obs['stats'][2] = robot_obs[5] / 10
+                obs['stats'][3] = robot_obs[6] / 10
+
+        for coord, energy in base_obs.crystals.items():
+            row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
+            col = min(int(coord.split(",")[0]), 19)
+            obs["spatial"][8,row,col] = 1
+
+        for coord, info in base_obs.mines.items():
+            row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
+            col = min(int(coord.split(",")[0]), 19)
+            obs["spatial"][9,row,col] = 1
+
+
+        # Wall information
         walls = np.array(base_obs.walls, dtype=np.int8).reshape(20, 20)
-        obs["spatial"][1] = ((walls & 1) != 0).astype(np.float32)
-        obs["spatial"][2] = ((walls & 2) != 0).astype(np.float32)
-        obs["spatial"][3] = ((walls & 4) != 0).astype(np.float32)
-        obs["spatial"][4] = ((walls & 8) != 0).astype(np.float32)
+        obs["spatial"][0] = ((walls & 1) != 0).astype(np.float32)
+        obs["spatial"][1] = ((walls & 2) != 0).astype(np.float32)
+        obs["spatial"][2] = ((walls & 4) != 0).astype(np.float32)
+        obs["spatial"][3] = ((walls & 8) != 0).astype(np.float32)
+
+        # More stats
+        obs["stats"][1] = self.timestep
 
         return obs
 
-    def step(self, action):
-        self.timestep += 1
-        agent_action = ACTION_MAPPING[action]
-        game_action = game_agent(self.game_obs, agent_action)
+    def detect_outcome(self, done, info):
+        # Win/loss/draw detection runs regardless of the active reward function so
+        # GameMetricsCallback can log win rate and score margin either way.
+        if not done:
+            return
 
-        prev_game_obs = self.game_obs
-        self.game_obs, _, done, info = self.trainer.step(game_action)
+        our_score = self.base_env.state[0].reward
+        opponent_score = self.base_env.state[1].reward
 
+        if our_score > opponent_score:
+            outcome = "win"
+        elif our_score < opponent_score:
+            outcome = "loss"
+        else:
+            outcome = "draw"
+
+        info["outcome"] = outcome
+        info["final_scores"] = [our_score, opponent_score]
+
+    def noahs_reward(self, obs, action, done):
+        # Obs are formatted how Kaggle provides them
+        # Action follows Kaggle formatting as well (per-robot action strings)
+        reward = 0
+        if done:
+            reward = -100
+            return reward
+
+        reward += 1  # Survival
+
+        walls = np.array(obs.walls, dtype=np.int8).reshape(20, 20)
+        for robot, robot_obs in obs.robots.items():
+            if robot_obs[4] != obs.player:
+                continue
+
+            row = min(int(robot_obs[2]) - int(obs.southBound), 19)
+            col = min(int(robot_obs[1]), 19)
+
+            if robot == "0-0":  # Factory
+                if "JUMP" in action[robot]:
+                    reward -= 0.5  # Jumping is costly and should be avoided
+                elif action[robot] in self.cardinal:
+                    if (walls[row, col] & self.cardinal_bitwise[action[robot]]) == 0:  # Wall is not in the way
+                        reward += 2  # reward for going in a correct direction
+                        if action[robot] == "NORTH":
+                            reward += 0.25  # extra (small) reward for going north when possible
+                    else:
+                        reward -= 1  # penalty for bumping into a wall
+                elif action[robot] == "IDLE":
+                    reward -= 0.25  # Idle is not the worst thing in the world but unideal, penalized
+
+        return reward
+
+    def height_reward(self, obs, action, done):
+        # Terminal win/loss plus height shaping. `action` is the per-robot action
+        # dict; the factory's action is read from it for the jump penalty.
         reward = 0
         if done:
             our_score = self.base_env.state[0].reward
             opponent_score = self.base_env.state[1].reward
-
             if our_score > opponent_score:
                 reward += 100.0
-                outcome = "win"
             elif our_score < opponent_score:
                 reward -= 100.0
-                outcome = "loss"
-            else:
-                outcome = "draw"
-
-            info["outcome"] = outcome
-            info["final_scores"] = [our_score, opponent_score]
         else:
             reward += 1.0
 
-        # Penalize Invalid Moves
-        prev_factory_obs = prev_game_obs.robots.get("0-0", None)
-        if prev_factory_obs is not None:
-            # prev_move_cd = prev_factory_obs[5]
+        # Penalize invalid jumps using the pre-step factory jump cooldown
+        factory_action = action.get("0-0")
+        prev_factory_obs = (
+            self.prev_game_obs.robots.get("0-0")
+            if self.prev_game_obs is not None
+            else None
+        )
+        if factory_action is not None and prev_factory_obs is not None:
             prev_jump_cooldown = prev_factory_obs[6]
-            if agent_action.startswith("JUMP") and prev_jump_cooldown > 0:
+            if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
                 reward -= 2.0
 
-        curr_factory_obs = self.game_obs.robots.get("0-0", None)
+        curr_factory_obs = obs.robots.get("0-0")
         if curr_factory_obs is not None:
             board_height = 20
             row = curr_factory_obs[2]
-            relative_height = (row - self.game_obs.southBound) / board_height
+            relative_height = (row - obs.southBound) / board_height
             reward += MAX_HEIGHT_REWARD * relative_height
 
-            is_close_to_bottom = row - self.game_obs.southBound < 3
+            is_close_to_bottom = row - obs.southBound < 3
             if is_close_to_bottom:
                 reward -= 2.0
 
+        return reward
+
+    def reward(self, obs, action, done):
+        if USE_NOAHS_REWARD_FUNC:
+            return self.noahs_reward(obs, action, done)
+        return self.height_reward(obs, action, done)
+
+    def step(self, action):
+        self.prev_game_obs = self.game_obs
+        game_action = game_agent(self.game_obs, action)
+        self.game_obs, _, done, info = self.trainer.step(game_action)
+        self.timestep += 1
+
+        reward = self.reward(self.game_obs, game_action, done)
+        self.detect_outcome(done, info)
+
         truncated = 0
         return (
-            self.format_obs(self.game_obs, self.timestep),
+            self.format_obs(self.game_obs),
             reward,
             done,
             truncated,
@@ -137,16 +278,21 @@ class CrawlEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.timestep = 0
+
+        self.prev_factory_row = 0
+        self.prev_mine_count = 0
+        self.prev_robot_count = 0
+        self.prev_game_obs = None
+
         game_seed = (
             seed
             if seed is not None
             else self.np_random.integers(0, np.iinfo(np.int32).max)
         )
-        self._create_game(game_seed)
-        self.game_obs = self.trainer.reset()
-        return self.format_obs(self.game_obs, self.timestep), {"seed": int(game_seed)}
+        self.make_trainer_env(game_seed)
+        return self.format_obs(self.game_obs), {"seed": int(game_seed)}
 
-    def render(self, mode="human", width=800, height=800, **kwargs):
+    def render(self, mode="html", width=800, height=800, **kwargs):
         return self.base_env.render(mode=mode, width=width, height=height, **kwargs)
 
     def close(self):

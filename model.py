@@ -13,7 +13,7 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
         observation_space: spaces.Dict,
         features_dim: int = 128,
         cnn_head_dim: int = 64,
-        metadata_head_dim: int = 8,
+        metadata_head_dim: int = 4,
     ):
         super(CNNFeatureExtractor, self).__init__(observation_space, features_dim)
 

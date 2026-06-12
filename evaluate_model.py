@@ -3,7 +3,7 @@ import os
 import numpy as np
 
 from env import CrawlEnv
-from stable_baselines3 import PPO
+from sb3_contrib import MaskablePPO
 
 from constants import MODEL_PATH, REPLAY_OUTPUT_DIR
 from model import CNNFeatureExtractor
@@ -17,20 +17,24 @@ def setup_output_dir():
 
 
 def run_episode(
-    env: CrawlEnv, model: PPO, seed: int | None = None, deterministic: bool = False
+    env: CrawlEnv,
+    model: MaskablePPO,
+    seed: int | None = None,
+    deterministic: bool = False,
 ):
     obs, _ = env.reset(seed=seed)
 
     done = False
     while not done:
-        action, _ = model.predict(obs, deterministic=deterministic)
-        obs, reward, terminated, truncated, info = env.step(action.item())
-        done = terminated or truncated
+        action, _ = model.predict(
+            obs, action_masks=env.action_masks(), deterministic=deterministic
+        )
+        obs, reward, done, truncated, info = env.step(action)
 
 
 def run_n_episodes(
     env: CrawlEnv,
-    model: PPO,
+    model: MaskablePPO,
     n: int,
     output_dir: str = None,
     seed: int | None = None,
@@ -64,7 +68,7 @@ if __name__ == "__main__":
 
     crawl_env = CrawlEnv()
 
-    model = PPO.load(
+    model = MaskablePPO.load(
         MODEL_PATH,
         policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
     )

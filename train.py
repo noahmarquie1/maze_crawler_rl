@@ -1,20 +1,27 @@
 from collections import deque
 
 import numpy as np
-from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv
-from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import (
-    BaseCallback,
-    CallbackList,
-    CheckpointCallback,
-)
-import argparse
 import os
-from env import CrawlEnv
+import glob
+import zipfile
+import torch
+import io
+import contextlib
+import warnings
+from misc.log_stopper import LogStopper
 
-from model import CNNFeatureExtractor
-from evaluate_model import run_n_episodes
+# Constants
+n_envs = 16
+
+# Suppress warnings on import
+with LogStopper():
+    from sb3_contrib import MaskablePPO
+    from stable_baselines3.common.vec_env import SubprocVecEnv
+    from stable_baselines3.common.monitor import Monitor
+    from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
+    from model import CNNFeatureExtractor
+    from env import CrawlEnv
+    from evaluate_model import run_n_episodes
 
 
 class GameMetricsCallback(BaseCallback):
@@ -68,6 +75,7 @@ class GameMetricsCallback(BaseCallback):
         return True
 
 
+# Callbacks
 class EvalCallback(BaseCallback):
     def __init__(
         self, eval_freq: int, n_episodes: int = 5, replay_dir: str = "eval_replays"
@@ -88,37 +96,71 @@ class EvalCallback(BaseCallback):
         return True
 
 
+# Helpers
+def get_latest_checkpoint(checkpoint_dir, prefix):
+    # Find all matching checkpoint files
+    files = glob.glob(os.path.join(checkpoint_dir, f"{prefix}_*.zip"))
+    if not files:
+        return None
+    
+    # Sort files by modification time, newest first
+    files.sort(key=os.path.getmtime, reverse=True)
+    
+    for file_path in files:
+        try:
+            with zipfile.ZipFile(file_path, "r") as archive:
+                pth_files = [name for name in archive.namelist() if name.endswith('.pth')]
+                
+                if not pth_files:
+                    raise RuntimeError("No PyTorch weight files found in archive.")
+
+                for pth_file in pth_files:
+                    weight_data = archive.read(pth_file)
+                    buffer = io.BytesIO(weight_data)
+                    torch.load(buffer, map_location="cpu", weights_only=True)
+            
+            return file_path
+            
+        except (zipfile.BadZipFile, RuntimeError, KeyError, EOFError) as e:
+            print(f"Warning: Checkpoint {os.path.basename(file_path)} is corrupted ({type(e).__name__}). Skipping...")
+            continue
+            
+    return None
+
+
 if __name__ == "__main__":
-    USE_CHECKPOINT = False
-    CHECKPOINT_FILE = "ppo_crawl.zip"
+    USE_CHECKPOINT = True
+
+    checkpoint_file = "ppo_crawl.zip"
     out = "ppo_crawl"
     checkpoint_dir = "checkpoints"
     tensorboard_log_dir = "logs/tensorboard"
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(tensorboard_log_dir, exist_ok=True)
 
-    n_envs = 32
-    n_envs = 8
-    env = SubprocVecEnv([lambda: Monitor(CrawlEnv()) for _ in range(n_envs)])
+    with LogStopper():
+        env = SubprocVecEnv([lambda: Monitor(CrawlEnv()) for _ in range(n_envs)])
+    print(f"Num envs: {env.num_envs}")
 
-    checkpoint_exists = USE_CHECKPOINT and os.path.exists(CHECKPOINT_FILE)
+    dir_checkpoint = get_latest_checkpoint(checkpoint_dir, out)
+    checkpoint_file = dir_checkpoint if not dir_checkpoint is None else checkpoint_file
+
+    checkpoint_exists = USE_CHECKPOINT and os.path.exists(checkpoint_file)
     if checkpoint_exists:
-        agent = PPO.load(
-            CHECKPOINT_FILE,
-            env=env,
-            tensorboard_log=tensorboard_log_dir,
+        agent = MaskablePPO.load(
+            checkpoint_file, env=env, tensorboard_log=tensorboard_log_dir
         )
-        print(f"Resuming from {CHECKPOINT_FILE}")
+        print(f"Resuming from {checkpoint_file}")
 
     else:
-        agent = PPO(
+        agent = MaskablePPO(
             "MultiInputPolicy",
             env,
             n_steps=512,
+            batch_size=512,
             policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
-            batch_size=128,
-            tensorboard_log=tensorboard_log_dir,
             verbose=1,
+            tensorboard_log=tensorboard_log_dir,
         )
 
     callbacks = CallbackList(
@@ -149,7 +191,5 @@ if __name__ == "__main__":
         if os.path.exists(out + ".zip"):
             os.remove(out + ".zip")
         agent.save(out)
-        html_out = env.render(mode="html")
-        if html_out is not None:
-            with open("error_replay.html", "w") as f:
-                f.write(html_out)
+        env.close()
+        print(f"Agent saved to {out}.zip - training complete.")

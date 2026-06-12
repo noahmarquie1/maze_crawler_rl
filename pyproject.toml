@@ -9,9 +9,9 @@ dependencies = [
     "numpy==2.4.6",
     "pandas==3.0.3",
     "torch==2.7.1",
-    "stable_baselines3==2.7.1",
+    "stable_baselines3==2.8.0",
+    "sb3_contrib==2.8.0",
     "tensorboard",
-
     "gymnasium==1.2.0",
     "kaggle-environments==1.30.1",
 ]

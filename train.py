@@ -12,6 +12,7 @@ from misc.log_stopper import LogStopper
 
 # Constants
 n_envs = 16
+n_residual_blocks = 0
 
 # Suppress warnings on import
 with LogStopper():
@@ -168,6 +169,7 @@ if __name__ == "__main__":
             batch_size=512,
             verbose=1,
             tensorboard_log=tensorboard_log_dir,
+            policy_kwargs={"n_residual_blocks": n_residual_blocks},
         )
 
     callbacks = CallbackList(

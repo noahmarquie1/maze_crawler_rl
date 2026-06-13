@@ -37,6 +37,28 @@ class ConditionalInstanceNorm(nn.Module):
         return normed * (1 + scale) + shift
 
 
+class ResidualBlock(nn.Module):
+    """Original (post-activation) residual block with Conditional Instance Norm.
+
+    Applies ``conv -> CIN -> relu -> conv -> CIN``, adds the block input, then a
+    final relu. Channel count is preserved so the skip connection lines up
+    without a projection. Both CIN layers are conditioned on the same global
+    stats vector.
+    """
+
+    def __init__(self, cond_dim: int, num_channels: int):
+        super().__init__()
+        self.conv1 = nn.Conv2d(num_channels, num_channels, kernel_size=3, padding=1)
+        self.norm1 = ConditionalInstanceNorm(cond_dim, num_channels)
+        self.conv2 = nn.Conv2d(num_channels, num_channels, kernel_size=3, padding=1)
+        self.norm2 = ConditionalInstanceNorm(cond_dim, num_channels)
+
+    def forward(self, features: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        x = torch.relu(self.norm1(self.conv1(features), cond))
+        x = self.norm2(self.conv2(x), cond)
+        return torch.relu(x + features)
+
+
 class CNNFeatureExtractor(BaseFeaturesExtractor):
     """Shared convolutional trunk with Conditional Instance Norm on global stats.
 
@@ -50,7 +72,7 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
     expect a flat input.
     """
 
-    def __init__(self, observation_space: spaces.Dict):
+    def __init__(self, observation_space: spaces.Dict, n_residual_blocks: int = 0):
         self.out_channels = 16
 
         spatial_space = observation_space["spatial"]
@@ -69,6 +91,9 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
         self.norm1 = ConditionalInstanceNorm(cond_dim, 8)
         self.conv2 = nn.Conv2d(8, self.out_channels, kernel_size=3, stride=1, padding=1)
         self.norm2 = ConditionalInstanceNorm(cond_dim, self.out_channels)
+        self.res_blocks = nn.ModuleList(
+            ResidualBlock(cond_dim, self.out_channels) for _ in range(n_residual_blocks)
+        )
 
     def forward(self, observations: Mapping[str, torch.Tensor]) -> torch.Tensor:
         spatial = observations["spatial"]
@@ -76,6 +101,8 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
 
         x = torch.relu(self.norm1(self.conv1(spatial), stats))
         x = torch.relu(self.norm2(self.conv2(x), stats))
+        for block in self.res_blocks:
+            x = block(x, stats)
         return x
 
 
@@ -129,7 +156,9 @@ class CrawlMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     is an identity and the (B, C, H, W) trunk map reaches the heads untouched.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, n_residual_blocks: int = 0, **kwargs):
+        # Stored before super().__init__ since that triggers make_features_extractor.
+        self.n_residual_blocks = n_residual_blocks
         kwargs["net_arch"] = []
         super().__init__(*args, **kwargs)
 
@@ -138,7 +167,9 @@ class CrawlMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # the policy is self-contained. This is the single seam SB3's inherited
         # methods route obs through, so building it here keeps every one of them
         # (forward, evaluate_actions, get_distribution, predict_values) working.
-        return CNNFeatureExtractor(self.observation_space)
+        return CNNFeatureExtractor(
+            self.observation_space, n_residual_blocks=self.n_residual_blocks
+        )
 
     def _build(self, lr_schedule: Schedule) -> None:
         self._build_mlp_extractor()

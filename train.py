@@ -18,7 +18,11 @@ with LogStopper():
     from sb3_contrib import MaskablePPO
     from stable_baselines3.common.vec_env import SubprocVecEnv
     from stable_baselines3.common.monitor import Monitor
-    from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
+    from stable_baselines3.common.callbacks import (
+        BaseCallback,
+        CallbackList,
+        CheckpointCallback,
+    )
     from model import CrawlMaskablePolicy
     from env import CrawlEnv
     from evaluate_model import run_n_episodes
@@ -102,15 +106,17 @@ def get_latest_checkpoint(checkpoint_dir, prefix):
     files = glob.glob(os.path.join(checkpoint_dir, f"{prefix}_*.zip"))
     if not files:
         return None
-    
+
     # Sort files by modification time, newest first
     files.sort(key=os.path.getmtime, reverse=True)
-    
+
     for file_path in files:
         try:
             with zipfile.ZipFile(file_path, "r") as archive:
-                pth_files = [name for name in archive.namelist() if name.endswith('.pth')]
-                
+                pth_files = [
+                    name for name in archive.namelist() if name.endswith(".pth")
+                ]
+
                 if not pth_files:
                     raise RuntimeError("No PyTorch weight files found in archive.")
 
@@ -118,18 +124,20 @@ def get_latest_checkpoint(checkpoint_dir, prefix):
                     weight_data = archive.read(pth_file)
                     buffer = io.BytesIO(weight_data)
                     torch.load(buffer, map_location="cpu", weights_only=True)
-            
+
             return file_path
-            
+
         except (zipfile.BadZipFile, RuntimeError, KeyError, EOFError) as e:
-            print(f"Warning: Checkpoint {os.path.basename(file_path)} is corrupted ({type(e).__name__}). Skipping...")
+            print(
+                f"Warning: Checkpoint {os.path.basename(file_path)} is corrupted ({type(e).__name__}). Skipping..."
+            )
             continue
-            
+
     return None
 
 
 if __name__ == "__main__":
-    USE_CHECKPOINT = True
+    USE_CHECKPOINT = False
 
     checkpoint_file = "ppo_crawl.zip"
     out = "ppo_crawl"

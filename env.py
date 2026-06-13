@@ -52,18 +52,20 @@ class CrawlEnv(gym.Env):
         self.action_space = spaces.MultiDiscrete([13] * 400)
         self.timestep: int = 0
 
-        self.observation_space = spaces.Dict({
-            # 0-3,  walls n, e, s, w
-            # 4-7,  robots factory, scout, worker, miner
-            # 8,    crystals
-            # 9,    mines
-            # 10,   factory energy (painted at the factory cell)
-            # 11,   factory move cooldown (painted at the factory cell)
-            # 12,   factory jump cooldown (painted at the factory cell)
-            "spatial": spaces.Box(0, np.inf, shape=(13, 20, 20)),
-            # 0, normalized game timestep (global FiLM conditioning)
-            "stats": spaces.Box(0, 1, shape=(1,)),
-        })
+        self.observation_space = spaces.Dict(
+            {
+                # 0-3,  walls n, e, s, w
+                # 4-7,  robots factory, scout, worker, miner
+                # 8,    crystals
+                # 9,    mines
+                # 10,   factory energy (painted at the factory cell)
+                # 11,   factory move cooldown (painted at the factory cell)
+                # 12,   factory jump cooldown (painted at the factory cell)
+                "spatial": spaces.Box(0, np.inf, shape=(13, 20, 20)),
+                # 0, normalized game timestep (global FiLM conditioning)
+                "stats": spaces.Box(0, 1, shape=(1,)),
+            }
+        )
 
         self.game_obs = None
         self.prev_game_obs = None
@@ -86,7 +88,7 @@ class CrawlEnv(gym.Env):
 
     def make_trainer_env(self, seed=None):
         configuration = {"randomSeed": int(seed)} if seed is not None else None
-        with contextlib.redirect_stdout(open(os.devnull, 'w')):
+        with contextlib.redirect_stdout(open(os.devnull, "w")):
             self.base_env = make("crawl", configuration=configuration)
         self.trainer = self.base_env.train([None, decision_tree_opponent])
         self.game_obs = self.trainer.reset()
@@ -97,13 +99,19 @@ class CrawlEnv(gym.Env):
 
         type_valid_actions = {
             0: range(12),  # Factory: 0-11
-            1: range(5),   # Scout: 0-4
+            1: range(5),  # Scout: 0-4
             2: range(13),  # Worker: 0-12
-            3: range(6),   # Miner: 0-5
+            3: range(6),  # Miner: 0-5
         }
 
         for robot, robot_obs in self.game_obs.robots.items():
-            rtype, col, row, energy, owner = int(robot_obs[0]), int(robot_obs[1]), int(robot_obs[2]), robot_obs[3], robot_obs[4]
+            rtype, col, row, energy, owner = (
+                int(robot_obs[0]),
+                int(robot_obs[1]),
+                int(robot_obs[2]),
+                robot_obs[3],
+                robot_obs[4],
+            )
             if owner != self.game_obs.player:
                 continue
 
@@ -130,7 +138,7 @@ class CrawlEnv(gym.Env):
             "spatial": np.zeros((13, 20, 20), dtype=np.float32),
             # Stats are:
             # 1. normalized game timestep
-            "stats": np.zeros((1,), dtype=np.float32)
+            "stats": np.zeros((1,), dtype=np.float32),
         }
         for robot, robot_obs in base_obs.robots.items():
             if robot_obs[4] != base_obs.player:
@@ -139,23 +147,22 @@ class CrawlEnv(gym.Env):
             type = robot_obs[0]
             row = min(int(robot_obs[2]) - int(base_obs.southBound), 19)
             col = min(int(robot_obs[1]), 19)
-            obs["spatial"][4+type, row, col] = 1
+            obs["spatial"][4 + type, row, col] = 1
 
             if robot == "0-0":
                 obs["spatial"][10, row, col] = robot_obs[3] / 1000  # factory energy
-                obs["spatial"][11, row, col] = robot_obs[5] / 10    # factory move cd
-                obs["spatial"][12, row, col] = robot_obs[6] / 10    # factory jump cd
+                obs["spatial"][11, row, col] = robot_obs[5] / 10  # factory move cd
+                obs["spatial"][12, row, col] = robot_obs[6] / 10  # factory jump cd
 
         for coord, energy in base_obs.crystals.items():
             row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
             col = min(int(coord.split(",")[0]), 19)
-            obs["spatial"][8,row,col] = 1
+            obs["spatial"][8, row, col] = 1
 
         for coord, info in base_obs.mines.items():
             row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
             col = min(int(coord.split(",")[0]), 19)
-            obs["spatial"][9,row,col] = 1
-
+            obs["spatial"][9, row, col] = 1
 
         # Wall information
         walls = np.array(base_obs.walls, dtype=np.int8).reshape(20, 20)
@@ -210,7 +217,9 @@ class CrawlEnv(gym.Env):
                 if "JUMP" in action[robot]:
                     reward -= 0.5  # Jumping is costly and should be avoided
                 elif action[robot] in self.cardinal:
-                    if (walls[row, col] & self.cardinal_bitwise[action[robot]]) == 0:  # Wall is not in the way
+                    if (
+                        walls[row, col] & self.cardinal_bitwise[action[robot]]
+                    ) == 0:  # Wall is not in the way
                         reward += 2  # reward for going in a correct direction
                         if action[robot] == "NORTH":
                             reward += 0.25  # extra (small) reward for going north when possible
@@ -221,7 +230,7 @@ class CrawlEnv(gym.Env):
 
         return reward
 
-    def height_reward(self, obs, action, done):
+    def michaels_reward(self, obs, action, done):
         # Terminal win/loss plus height shaping. `action` is the per-robot action
         # dict; the factory's action is read from it for the jump penalty.
         reward = 0
@@ -263,7 +272,7 @@ class CrawlEnv(gym.Env):
     def reward(self, obs, action, done):
         if USE_NOAHS_REWARD_FUNC:
             return self.noahs_reward(obs, action, done)
-        return self.height_reward(obs, action, done)
+        return self.michaels_reward(obs, action, done)
 
     def step(self, action):
         self.prev_game_obs = self.game_obs

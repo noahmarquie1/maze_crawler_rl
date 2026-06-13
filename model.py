@@ -13,33 +13,37 @@ from sb3_contrib.common.maskable.policies import MaskableMultiInputActorCriticPo
 N_ACTION_TYPES = 13  # per-cell action vocabulary, matches MultiDiscrete([13] * 400)
 
 
-class FiLM(nn.Module):
-    """Feature-wise linear modulation conditioned on global stats.
+class ConditionalInstanceNorm(nn.Module):
+    """Conditional Instance Normalization conditioned on global stats.
 
-    Projects the conditioning vector to a per-channel scale and shift and
-    applies them to a (B, C, H, W) feature map. No normalization is applied, so
-    this is a surgical addition on top of the existing conv stack. The scale is
-    centered at 1 (``features * (1 + scale)``) so an untrained FiLM starts close
-    to identity.
+    Normalizes a (B, C, H, W) feature map per-instance and per-channel over the
+    spatial dims, then applies a conditioned per-channel scale and shift derived
+    from the conditioning vector. InstanceNorm uses ``affine=False`` so the only
+    affine parameters are the conditioned ones from ``proj``. The scale is
+    centered at 1 (``normed * (1 + scale)``) so an untrained module starts as a
+    plain instance norm.
     """
 
     def __init__(self, cond_dim: int, num_channels: int):
         super().__init__()
+        self.norm = nn.InstanceNorm2d(num_channels, affine=False)
         self.proj = nn.Linear(cond_dim, 2 * num_channels)
 
     def forward(self, features: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
+        normed = self.norm(features)
         scale, shift = self.proj(cond).chunk(2, dim=1)
         scale = scale.unsqueeze(-1).unsqueeze(-1)
         shift = shift.unsqueeze(-1).unsqueeze(-1)
-        return features * (1 + scale) + shift
+        return normed * (1 + scale) + shift
 
 
 class CNNFeatureExtractor(BaseFeaturesExtractor):
-    """Shared convolutional trunk with FiLM conditioning on global stats.
+    """Shared convolutional trunk with Conditional Instance Norm on global stats.
 
-    FiLM is applied after each conv block (before the activation) so the global
-    signal is injected early enough for a downstream 3x3 conv to propagate it
-    spatially. Unlike a stock extractor this returns the 4D (B, C, H, W) trunk
+    Conditional Instance Norm is applied after each conv block (before the
+    activation) so the global signal is injected early enough for a downstream
+    3x3 conv to propagate it spatially. Unlike a stock extractor this returns the
+    4D (B, C, H, W) trunk
     map rather than a flat vector: the spatial heads consume it directly, and the
     identity mlp_extractor (net_arch=[]) passes it through untouched. Only valid
     paired with CrawlMaskablePolicy -- a stock net_arch with Linear layers would
@@ -62,18 +66,16 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
         )
 
         self.conv1 = nn.Conv2d(in_channels, 8, kernel_size=3, stride=1, padding=1)
-        self.film1 = FiLM(cond_dim, 8)
+        self.norm1 = ConditionalInstanceNorm(cond_dim, 8)
         self.conv2 = nn.Conv2d(8, self.out_channels, kernel_size=3, stride=1, padding=1)
-        self.film2 = FiLM(cond_dim, self.out_channels)
-        self.conv2 = nn.Conv2d(8, self.out_channels, kernel_size=3, stride=1, padding=1)
-        self.film2 = FiLM(cond_dim, self.out_channels)
+        self.norm2 = ConditionalInstanceNorm(cond_dim, self.out_channels)
 
     def forward(self, observations: Mapping[str, torch.Tensor]) -> torch.Tensor:
         spatial = observations["spatial"]
         stats = observations["stats"]
 
-        x = torch.relu(self.film1(self.conv1(spatial), stats))
-        x = torch.relu(self.film2(self.conv2(x), stats))
+        x = torch.relu(self.norm1(self.conv1(spatial), stats))
+        x = torch.relu(self.norm2(self.conv2(x), stats))
         return x
 
 

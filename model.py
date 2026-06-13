@@ -156,7 +156,7 @@ class CrawlMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     is an identity and the (B, C, H, W) trunk map reaches the heads untouched.
     """
 
-    def __init__(self, *args, n_residual_blocks: int = 0, **kwargs):
+    def __init__(self, *args, n_residual_blocks: int = 10, **kwargs):
         # Stored before super().__init__ since that triggers make_features_extractor.
         self.n_residual_blocks = n_residual_blocks
         kwargs["net_arch"] = []

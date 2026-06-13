@@ -239,15 +239,13 @@ class CrawlEnv(gym.Env):
                 if "JUMP" in action[robot]:
                     reward -= 1  # Jumping is costly and should be avoided
                 elif action[robot] in self.cardinal:
-                    row = min(int(factory_obs[2]) - int(obs.southBound), 19)
-                    col = min(int(factory_obs[1]), 19)
                     cell = (row, col)
 
                     # Reward factory based on whether cell has been previously visited
                     if (walls[row, col] & self.cardinal_bitwise[action[robot]]) == 0: 
                         if cell not in self.visited_cells:
                             reward += 2.0
-                            self.visited_cells.add(cell)
+                            self.visited_cells.append(cell)
                             if action[robot] == "NORTH":
                                 reward += 0.5
                         else:

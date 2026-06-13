@@ -19,7 +19,7 @@ with LogStopper():
     from stable_baselines3.common.vec_env import SubprocVecEnv
     from stable_baselines3.common.monitor import Monitor
     from stable_baselines3.common.callbacks import BaseCallback, CallbackList, CheckpointCallback
-    from model import CNNFeatureExtractor
+    from model import CrawlMaskablePolicy
     from env import CrawlEnv
     from evaluate_model import run_n_episodes
 
@@ -154,11 +154,10 @@ if __name__ == "__main__":
 
     else:
         agent = MaskablePPO(
-            "MultiInputPolicy",
+            CrawlMaskablePolicy,
             env,
             n_steps=512,
             batch_size=512,
-            policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
             verbose=1,
             tensorboard_log=tensorboard_log_dir,
         )

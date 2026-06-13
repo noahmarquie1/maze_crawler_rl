@@ -14,6 +14,16 @@ from misc.log_stopper import LogStopper
 n_envs = 16
 n_residual_blocks = 0
 
+
+def select_device() -> str:
+    """Pick the best available device. SB3's "auto" only knows cpu/cuda, so we
+    detect MPS (Apple Silicon) ourselves and fall back to cpu otherwise."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
 # Suppress warnings on import
 with LogStopper():
     from sb3_contrib import MaskablePPO
@@ -147,6 +157,9 @@ if __name__ == "__main__":
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(tensorboard_log_dir, exist_ok=True)
 
+    device = select_device()
+    print(f"Using device: {device}")
+
     with LogStopper():
         env = SubprocVecEnv([lambda: Monitor(CrawlEnv()) for _ in range(n_envs)])
     print(f"Num envs: {env.num_envs}")
@@ -157,7 +170,10 @@ if __name__ == "__main__":
     checkpoint_exists = USE_CHECKPOINT and os.path.exists(checkpoint_file)
     if checkpoint_exists:
         agent = MaskablePPO.load(
-            checkpoint_file, env=env, tensorboard_log=tensorboard_log_dir
+            checkpoint_file,
+            env=env,
+            tensorboard_log=tensorboard_log_dir,
+            device=device,
         )
         print(f"Resuming from {checkpoint_file}")
 
@@ -170,6 +186,7 @@ if __name__ == "__main__":
             verbose=1,
             tensorboard_log=tensorboard_log_dir,
             policy_kwargs={"n_residual_blocks": n_residual_blocks},
+            device=device,
         )
 
     callbacks = CallbackList(

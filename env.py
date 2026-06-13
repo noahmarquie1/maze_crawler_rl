@@ -85,6 +85,8 @@ class CrawlEnv(gym.Env):
             "SOUTH": 4,
             "WEST": 8,
         }
+        
+        self.visited_cells = []
 
     def make_trainer_env(self, seed=None):
         configuration = {"randomSeed": int(seed)} if seed is not None else None
@@ -198,13 +200,33 @@ class CrawlEnv(gym.Env):
     def noahs_reward(self, obs, action, done):
         # Obs are formatted how Kaggle provides them
         # Action follows Kaggle formatting as well (per-robot action strings)
+
+        # Terminal reward or penalty
         reward = 0
         if done:
-            reward = -100
+            our_score = self.base_env.state[0].reward
+            opponent_score = self.base_env.state[1].reward
+            if our_score > opponent_score:
+                reward += 30.0
+            elif our_score < opponent_score:
+                reward -= 30.0
             return reward
 
-        reward += 1  # Survival
 
+        # Invalid jump penalty
+        factory_action = action.get("0-0")
+        prev_factory_obs = (
+            self.prev_game_obs.robots.get("0-0")
+            if self.prev_game_obs is not None
+            else None
+        )
+        if factory_action is not None and prev_factory_obs is not None:
+            prev_jump_cooldown = prev_factory_obs[6]
+            if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
+                reward -= 2.0
+
+
+        # General movement reward
         walls = np.array(obs.walls, dtype=np.int8).reshape(20, 20)
         for robot, robot_obs in obs.robots.items():
             if robot_obs[4] != obs.player:
@@ -215,20 +237,29 @@ class CrawlEnv(gym.Env):
 
             if robot == "0-0":  # Factory
                 if "JUMP" in action[robot]:
-                    reward -= 0.5  # Jumping is costly and should be avoided
+                    reward -= 1  # Jumping is costly and should be avoided
                 elif action[robot] in self.cardinal:
-                    if (
-                        walls[row, col] & self.cardinal_bitwise[action[robot]]
-                    ) == 0:  # Wall is not in the way
-                        reward += 2  # reward for going in a correct direction
-                        if action[robot] == "NORTH":
-                            reward += 0.25  # extra (small) reward for going north when possible
+                    row = min(int(factory_obs[2]) - int(obs.southBound), 19)
+                    col = min(int(factory_obs[1]), 19)
+                    cell = (row, col)
+
+                    # Reward factory based on whether cell has been previously visited
+                    if (walls[row, col] & self.cardinal_bitwise[action[robot]]) == 0: 
+                        if cell not in self.visited_cells:
+                            reward += 2.0
+                            self.visited_cells.add(cell)
+                            if action[robot] == "NORTH":
+                                reward += 0.5
+                        else:
+                            reward -= 0.25
+
                     else:
                         reward -= 1  # penalty for bumping into a wall
                 elif action[robot] == "IDLE":
                     reward -= 0.25  # Idle is not the worst thing in the world but unideal, penalized
 
         return reward
+
 
     def michaels_reward(self, obs, action, done):
         # Terminal win/loss plus height shaping. `action` is the per-robot action
@@ -241,6 +272,7 @@ class CrawlEnv(gym.Env):
                 reward += 100.0
             elif our_score < opponent_score:
                 reward -= 100.0
+            return reward
         else:
             reward += 1.0
 
@@ -300,6 +332,7 @@ class CrawlEnv(gym.Env):
         self.prev_mine_count = 0
         self.prev_robot_count = 0
         self.prev_game_obs = None
+        self.visited_cells = []
 
         game_seed = (
             seed

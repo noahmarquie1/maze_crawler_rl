@@ -46,7 +46,9 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
     expect a flat input.
     """
 
-    def __init__(self, observation_space: spaces.Dict, trunk_channels: int = 16):
+    def __init__(self, observation_space: spaces.Dict):
+        self.out_channels = 16
+
         spatial_space = observation_space["spatial"]
         stats_space = observation_space["stats"]
         assert isinstance(spatial_space, spaces.Box)
@@ -56,15 +58,15 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
         cond_dim = stats_space.shape[0]
 
         super().__init__(
-            observation_space, features_dim=trunk_channels * height * width
+            observation_space, features_dim=self.out_channels * height * width
         )
-
-        self.trunk_channels = trunk_channels
 
         self.conv1 = nn.Conv2d(in_channels, 8, kernel_size=3, stride=1, padding=1)
         self.film1 = FiLM(cond_dim, 8)
-        self.conv2 = nn.Conv2d(8, trunk_channels, kernel_size=3, stride=1, padding=1)
-        self.film2 = FiLM(cond_dim, trunk_channels)
+        self.conv2 = nn.Conv2d(8, self.out_channels, kernel_size=3, stride=1, padding=1)
+        self.film2 = FiLM(cond_dim, self.out_channels)
+        self.conv2 = nn.Conv2d(8, self.out_channels, kernel_size=3, stride=1, padding=1)
+        self.film2 = FiLM(cond_dim, self.out_channels)
 
     def forward(self, observations: Mapping[str, torch.Tensor]) -> torch.Tensor:
         spatial = observations["spatial"]
@@ -139,7 +141,7 @@ class CrawlMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     def _build(self, lr_schedule: Schedule) -> None:
         self._build_mlp_extractor()
 
-        channels = self.features_extractor.trunk_channels
+        channels = self.features_extractor.out_channels
 
         self.action_net = SpatialActionHead(channels)
         self.value_net = PooledValueHead(channels)

@@ -72,8 +72,13 @@ class CNNFeatureExtractor(BaseFeaturesExtractor):
     expect a flat input.
     """
 
-    def __init__(self, observation_space: spaces.Dict, n_residual_blocks: int = 0):
-        self.out_channels = 16
+    def __init__(
+        self,
+        observation_space: spaces.Dict,
+        n_residual_blocks: int = 0,
+        out_channels: int = 16,
+    ):
+        self.out_channels = out_channels
 
         spatial_space = observation_space["spatial"]
         stats_space = observation_space["stats"]
@@ -156,7 +161,7 @@ class CrawlMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     is an identity and the (B, C, H, W) trunk map reaches the heads untouched.
     """
 
-    def __init__(self, *args, n_residual_blocks: int = 10, **kwargs):
+    def __init__(self, *args, n_residual_blocks: int = 3, **kwargs):
         # Stored before super().__init__ since that triggers make_features_extractor.
         self.n_residual_blocks = n_residual_blocks
         kwargs["net_arch"] = []

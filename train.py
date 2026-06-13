@@ -24,6 +24,7 @@ def select_device() -> str:
         return "mps"
     return "cpu"
 
+
 # Suppress warnings on import
 with LogStopper():
     from sb3_contrib import MaskablePPO
@@ -203,7 +204,7 @@ if __name__ == "__main__":
 
     try:
         agent.learn(
-            total_timesteps=int(3e6),
+            total_timesteps=int(5e5),
             log_interval=1,
             progress_bar=True,
             callback=callbacks,

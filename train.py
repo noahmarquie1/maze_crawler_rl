@@ -1,5 +1,6 @@
 from collections import deque
 
+import argparse
 import numpy as np
 import os
 import glob
@@ -11,6 +12,7 @@ import warnings
 from constants import (
     CHECKPOINT_DIR,
     EVAL_EVERY_N_STEPS,
+    EVAL_REPLAY_DIR,
     MODEL_PATH,
     N_RESIDUAL_BLOCKS,
     N_TRAINING_SUBPROC_ENVIRONMENTS,
@@ -33,6 +35,7 @@ def select_device() -> str:
 # Suppress warnings on import
 with LogStopper():
     from sb3_contrib import MaskablePPO
+    from stable_baselines3.common.utils import get_latest_run_id
     from stable_baselines3.common.vec_env import SubprocVecEnv
     from stable_baselines3.common.monitor import Monitor
     from stable_baselines3.common.callbacks import (
@@ -99,7 +102,7 @@ class GameMetricsCallback(BaseCallback):
 # Callbacks
 class EvalCallback(BaseCallback):
     def __init__(
-        self, eval_freq: int, n_episodes: int = 5, replay_dir: str = "eval_replays"
+        self, eval_freq: int, n_episodes: int = 5, replay_dir: str = EVAL_REPLAY_DIR
     ):
         super().__init__()
         self.eval_freq = eval_freq
@@ -154,6 +157,16 @@ def get_latest_checkpoint(checkpoint_dir, prefix):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train the Crawl PPO agent.")
+    parser.add_argument(
+        "--run-name",
+        default="crawl_ppo",
+        help="Name for this run's tensorboard, checkpoint, and eval-replay dirs. "
+        "If the name is already taken (by an existing tensorboard dir), the next "
+        "free '_n' suffix is appended.",
+    )
+    args = parser.parse_args()
+
     out = "ppo_crawl"
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     os.makedirs(TENSORBOARD_LOG_DIR, exist_ok=True)
@@ -181,6 +194,20 @@ if __name__ == "__main__":
     )
 
     checkpoint_exists = USE_CHECKPOINT_FOR_TRAINING and os.path.exists(checkpoint_file)
+    reset_num_timesteps = not checkpoint_exists
+
+    # Mirror SB3's tb-dir resolution so the checkpoint and eval-replay subdirs
+    # match the tensorboard run dir exactly. SB3 names the run
+    # f"{tb_log_name}_{latest_run_id + 1}", decrementing when resuming.
+    latest_run_id = get_latest_run_id(TENSORBOARD_LOG_DIR, args.run_name)
+    if not reset_num_timesteps:
+        latest_run_id -= 1
+    resolved_run_name = f"{args.run_name}_{latest_run_id + 1}"
+
+    checkpoint_dir = os.path.join(CHECKPOINT_DIR, resolved_run_name)
+    replay_dir = os.path.join(EVAL_REPLAY_DIR, resolved_run_name)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
     if checkpoint_exists:
         agent = MaskablePPO.load(
             checkpoint_file,
@@ -209,11 +236,11 @@ if __name__ == "__main__":
         [
             CheckpointCallback(
                 save_freq=50_000 // N_TRAINING_SUBPROC_ENVIRONMENTS,
-                save_path=CHECKPOINT_DIR,
+                save_path=checkpoint_dir,
                 name_prefix=out,
             ),
             GameMetricsCallback(window_size=100),
-            EvalCallback(eval_freq=EVAL_EVERY_N_STEPS),
+            EvalCallback(eval_freq=EVAL_EVERY_N_STEPS, replay_dir=replay_dir),
         ]
     )
 
@@ -223,8 +250,8 @@ if __name__ == "__main__":
             log_interval=1,
             progress_bar=True,
             callback=callbacks,
-            reset_num_timesteps=not checkpoint_exists,
-            tb_log_name="crawl_ppo",
+            reset_num_timesteps=reset_num_timesteps,
+            tb_log_name=args.run_name,
         )
 
     except Exception as e:

@@ -6,6 +6,7 @@ MODEL_PATH = "ppo_crawl"
 REPLAY_OUTPUT_DIR = "output_replays"
 CHECKPOINT_DIR = "checkpoints"
 TENSORBOARD_LOG_DIR = "logs/tensorboard"
+EVAL_REPLAY_DIR = "logs/eval_replays"
 
 # Training
 N_TRAINING_SUBPROC_ENVIRONMENTS = 20

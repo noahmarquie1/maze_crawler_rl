@@ -156,7 +156,10 @@ class PooledValueHead(nn.Module):
 
 
 class VecMaskableMultiCategoricalDistribution(MaskableMultiCategoricalDistribution):
-    """Vectorized drop-in for sb3-contrib's MaskableMultiCategoricalDistribution.
+    """
+    AI SLOPIFIED Performance improvements
+
+    Vectorized drop-in for sb3-contrib's MaskableMultiCategoricalDistribution.
 
     The stock implementation builds a Python list of one ``MaskableCategorical``
     per sub-action (400 of them here) and loops over that list for every

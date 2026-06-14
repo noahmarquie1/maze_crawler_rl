@@ -1,7 +1,7 @@
 DEBUG = False
 MODEL_PATH = "ppo_crawl"
 REPLAY_OUTPUT_DIR = "output_replays"
-MAX_HEIGHT_REWARD = 1
+MAX_HEIGHT_REWARD = 0.5
 # When True, use Noah's wall-aware reward; when False, use the height/win-margin reward.
 USE_NOAHS_REWARD_FUNC = True
 

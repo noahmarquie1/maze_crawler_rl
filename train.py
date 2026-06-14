@@ -185,6 +185,8 @@ if __name__ == "__main__":
             n_steps=512,
             batch_size=512,
             verbose=1,
+            gamma=0.995,
+            ent_coef=0.01,
             tensorboard_log=tensorboard_log_dir,
             policy_kwargs={"n_residual_blocks": n_residual_blocks},
             device=device,

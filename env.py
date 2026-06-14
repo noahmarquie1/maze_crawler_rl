@@ -238,11 +238,11 @@ class CrawlEnv(gym.Env):
             our_score = self.base_env.state[0].reward
             opponent_score = self.base_env.state[1].reward
             if our_score > opponent_score:
-                reward += 100.0
+                reward += 50.0
             elif our_score < opponent_score:
-                reward -= 100.0
+                reward -= 50.0
         else:
-            reward += 1.0
+            reward += 0.5
 
         # Penalize invalid jumps using the pre-step factory jump cooldown
         factory_action = action.get("0-0")
@@ -256,6 +256,7 @@ class CrawlEnv(gym.Env):
             if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
                 reward -= 2.0
 
+        # Penalize being close to the bottom and reward height using the current factory row
         curr_factory_obs = obs.robots.get("0-0")
         if curr_factory_obs is not None:
             board_height = 20
@@ -265,7 +266,7 @@ class CrawlEnv(gym.Env):
 
             is_close_to_bottom = row - obs.southBound < 3
             if is_close_to_bottom:
-                reward -= 2.0
+                reward -= 5.0
 
         return reward
 

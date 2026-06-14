@@ -7,3 +7,4 @@ checkpoints
 eval_replays
 archive_eval_replays
 .venv
+misc/bench*.py

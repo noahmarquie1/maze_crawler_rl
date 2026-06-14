@@ -191,6 +191,7 @@ if __name__ == "__main__":
             env,
             n_steps=512,
             batch_size=512,
+            n_epochs=4,  # fewer reuse passes per batch; ~1.5x faster, retunable
             verbose=1,
             gamma=0.995,
             ent_coef=0.01,

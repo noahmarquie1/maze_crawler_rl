@@ -13,6 +13,11 @@ from kaggle_environments import make
 import os
 import contextlib
 from opponent import decision_tree_opponent
+from kaggle_patches import patch_kaggle_schema_validation
+
+# Applied at import so every SubprocVecEnv worker (which imports this module)
+# skips the redundant per-step schema validation.
+patch_kaggle_schema_validation()
 
 MAX_GAME_STEPS = 500  # Crawl runs to step 500; used to normalize the timestep stat
 

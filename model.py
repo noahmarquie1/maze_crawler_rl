@@ -5,12 +5,17 @@ from gymnasium import spaces
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.type_aliases import Schedule
+from sb3_contrib.common.maskable.distributions import (
+    MaskableMultiCategoricalDistribution,
+)
 from sb3_contrib.common.maskable.policies import MaskableMultiInputActorCriticPolicy
 
 
 N_ACTION_TYPES = 13  # per-cell action vocabulary, matches MultiDiscrete([13] * 400)
+HUGE_NEG = -1e8  # masked-logit fill; large enough to zero the softmax probability
 
 
 class ConditionalInstanceNorm(nn.Module):
@@ -150,6 +155,72 @@ class PooledValueHead(nn.Module):
         return self.mlp(pooled)
 
 
+class VecMaskableMultiCategoricalDistribution(MaskableMultiCategoricalDistribution):
+    """Vectorized drop-in for sb3-contrib's MaskableMultiCategoricalDistribution.
+
+    The stock implementation builds a Python list of one ``MaskableCategorical``
+    per sub-action (400 of them here) and loops over that list for every
+    ``log_prob``/``entropy``/``sample`` call -- the dominant cost in both rollout
+    collection and training. This keeps all logits as a single
+    ``(B, n_cells, n_act)`` tensor and does masking, log-prob, entropy and
+    sampling with pure tensor ops. Numerically identical to the stock version
+    (``log_prob`` exact; ``entropy`` agrees to float noise). Assumes a uniform
+    per-cell action count, which holds for our ``MultiDiscrete([13] * 400)``.
+    """
+
+    def __init__(self, action_dims):
+        super().__init__(action_dims)
+        self.n_cells = len(action_dims)
+        self.n_act = int(action_dims[0])
+        assert all(int(d) == self.n_act for d in action_dims), (
+            "VecMaskableMultiCategoricalDistribution requires a uniform action count"
+        )
+        self._logits = None
+        self._logp = None
+        self._masks = None
+
+    def proba_distribution(self, action_logits):
+        self._logits = action_logits.view(-1, self.n_cells, self.n_act)
+        self._masks = None
+        self._recompute()
+        return self
+
+    def apply_masking(self, masks):
+        if masks is None:
+            self._masks = None
+        else:
+            self._masks = torch.as_tensor(
+                masks, dtype=torch.bool, device=self._logits.device
+            ).view(-1, self.n_cells, self.n_act)
+        self._recompute()
+
+    def _recompute(self):
+        logits = self._logits
+        if self._masks is not None:
+            logits = torch.where(self._masks, logits, torch.full_like(logits, HUGE_NEG))
+        self._logp = F.log_softmax(logits, dim=-1)
+
+    def log_prob(self, actions):
+        actions = actions.view(-1, self.n_cells, 1)
+        return self._logp.gather(-1, actions).squeeze(-1).sum(dim=1)
+
+    def entropy(self):
+        plogp = self._logp.exp() * self._logp
+        if self._masks is not None:
+            plogp = torch.where(self._masks, plogp, torch.zeros_like(plogp))
+        return -plogp.sum(-1).sum(dim=1)
+
+    def sample(self):
+        # Gumbel-max: argmax(logits + gumbel noise) draws from the categorical
+        # per cell without a Python loop or a multinomial reshape.
+        u = torch.empty_like(self._logp).uniform_(1e-10, 1.0)
+        gumbel = -torch.log(-torch.log(u))
+        return (self._logp + gumbel).argmax(dim=-1)
+
+    def mode(self):
+        return self._logp.argmax(dim=-1)
+
+
 class CrawlMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     """Fully-convolutional spatial policy for the grid action space.
 
@@ -178,6 +249,14 @@ class CrawlMaskablePolicy(MaskableMultiInputActorCriticPolicy):
 
     def _build(self, lr_schedule: Schedule) -> None:
         self._build_mlp_extractor()
+
+        # Swap the stock per-cell-loop distribution for the vectorized one. The
+        # action logits still come from SpatialActionHead below, so only the
+        # distribution math changes. Safe to replace here: this policy's heads
+        # don't use action_dist.proba_distribution_net.
+        self.action_dist = VecMaskableMultiCategoricalDistribution(
+            list(self.action_space.nvec)
+        )
 
         channels = self.features_extractor.out_channels
 

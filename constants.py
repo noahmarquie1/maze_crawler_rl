@@ -16,7 +16,6 @@ EVAL_EVERY_N_STEPS = 100_000
 # When True, use Noah's wall-aware reward; when False, use the height/win-margin reward.
 USE_NOAHS_REWARD_FUNC = False
 N_RESIDUAL_BLOCKS = 4
-MAX_HEIGHT_REWARD = 0.5
 
 # - - - Actions - - -
 FACTORY_MAPPING = {

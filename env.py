@@ -3,7 +3,6 @@ from constants import (
     SCOUT_MAPPING,
     WORKER_MAPPING,
     MINER_MAPPING,
-    MAX_HEIGHT_REWARD,
     USE_NOAHS_REWARD_FUNC,
 )
 import gymnasium as gym
@@ -236,6 +235,15 @@ class CrawlEnv(gym.Env):
         return reward
 
     def michaels_reward(self, obs, action, done):
+        LOW_HEIGHT_PENALTY = -1
+        JUMP_INVALID_PENALTY = -1
+        SURVIVAL_REWARD = 0.025
+        MAX_LINEAR_HEIGHT_REWARD = 0.025
+
+        # NO WIN/LOSS REWARD: survivial is the goal for now - win/loss is too sparse and random with our low winrate
+        WIN_REWARD = 0.0
+        LOSS_PENALTY = 0.0
+
         # Terminal win/loss plus height shaping. `action` is the per-robot action
         # dict; the factory's action is read from it for the jump penalty.
         reward = 0
@@ -243,11 +251,11 @@ class CrawlEnv(gym.Env):
             our_score = self.base_env.state[0].reward
             opponent_score = self.base_env.state[1].reward
             if our_score > opponent_score:
-                reward += 50.0
+                reward += WIN_REWARD
             elif our_score < opponent_score:
-                reward -= 50.0
+                reward += LOSS_PENALTY
         else:
-            reward += 0.5
+            reward += SURVIVAL_REWARD
 
         # Penalize being close to the bottom and reward height using the current factory row
         curr_factory_obs = obs.robots.get("0-0")
@@ -255,11 +263,11 @@ class CrawlEnv(gym.Env):
             board_height = 20
             row = curr_factory_obs[2]
             relative_height = (row - obs.southBound) / board_height
-            reward += MAX_HEIGHT_REWARD * relative_height
+            reward += MAX_LINEAR_HEIGHT_REWARD * relative_height
 
             is_close_to_bottom = row - obs.southBound < 3
             if is_close_to_bottom:
-                reward -= 5.0
+                reward += LOW_HEIGHT_PENALTY
 
         # Penalize invalid jumps using the pre-step factory jump cooldown
         factory_action = action.get("0-0")
@@ -271,7 +279,7 @@ class CrawlEnv(gym.Env):
         if factory_action is not None and prev_factory_obs is not None:
             prev_jump_cooldown = prev_factory_obs[6]
             if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
-                reward -= 2.0
+                reward += JUMP_INVALID_PENALTY
 
         return reward
 

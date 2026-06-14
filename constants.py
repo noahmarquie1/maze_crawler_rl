@@ -7,6 +7,9 @@ REPLAY_OUTPUT_DIR = "output_replays"
 CHECKPOINT_DIR = "checkpoints"
 TENSORBOARD_LOG_DIR = "logs/tensorboard"
 EVAL_REPLAY_DIR = "logs/eval_replays"
+MAX_HEIGHT_REWARD = 1
+# When True, use Noah's wall-aware reward; when False, use the height/win-margin reward.
+USE_NOAHS_REWARD_FUNC = False
 
 # Training
 TOTAL_TRAIN_STEPS = 1_000_000

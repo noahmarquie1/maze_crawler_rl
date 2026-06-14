@@ -8,11 +8,16 @@ import torch
 import io
 import contextlib
 import warnings
+from constants import (
+    CHECKPOINT_DIR,
+    EVAL_EVERY_N_STEPS,
+    MODEL_PATH,
+    N_RESIDUAL_BLOCKS,
+    N_TRAINING_SUBPROC_ENVIRONMENTS,
+    TENSORBOARD_LOG_DIR,
+    USE_CHECKPOINT_FOR_TRAINING,
+)
 from misc.log_stopper import LogStopper
-
-# Constants
-n_envs = 16
-n_residual_blocks = 0
 
 
 def select_device() -> str:
@@ -149,31 +154,33 @@ def get_latest_checkpoint(checkpoint_dir, prefix):
 
 
 if __name__ == "__main__":
-    USE_CHECKPOINT = False
-
-    checkpoint_file = "ppo_crawl.zip"
     out = "ppo_crawl"
-    checkpoint_dir = "checkpoints"
-    tensorboard_log_dir = "logs/tensorboard"
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    os.makedirs(tensorboard_log_dir, exist_ok=True)
+    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+    os.makedirs(TENSORBOARD_LOG_DIR, exist_ok=True)
 
     device = select_device()
     print(f"Using device: {device}")
 
     with LogStopper():
-        env = SubprocVecEnv([lambda: Monitor(CrawlEnv()) for _ in range(n_envs)])
+        env = SubprocVecEnv(
+            [
+                lambda: Monitor(CrawlEnv())
+                for _ in range(N_TRAINING_SUBPROC_ENVIRONMENTS)
+            ]
+        )
     print(f"Num envs: {env.num_envs}")
 
-    dir_checkpoint = get_latest_checkpoint(checkpoint_dir, out)
-    checkpoint_file = dir_checkpoint if not dir_checkpoint is None else checkpoint_file
+    dir_checkpoint = get_latest_checkpoint(CHECKPOINT_DIR, out)
+    checkpoint_file = (
+        dir_checkpoint if dir_checkpoint is not None else MODEL_PATH + ".zip"
+    )
 
-    checkpoint_exists = USE_CHECKPOINT and os.path.exists(checkpoint_file)
+    checkpoint_exists = USE_CHECKPOINT_FOR_TRAINING and os.path.exists(checkpoint_file)
     if checkpoint_exists:
         agent = MaskablePPO.load(
             checkpoint_file,
             env=env,
-            tensorboard_log=tensorboard_log_dir,
+            tensorboard_log=TENSORBOARD_LOG_DIR,
             device=device,
         )
         print(f"Resuming from {checkpoint_file}")
@@ -187,20 +194,20 @@ if __name__ == "__main__":
             verbose=1,
             gamma=0.995,
             ent_coef=0.01,
-            tensorboard_log=tensorboard_log_dir,
-            policy_kwargs={"n_residual_blocks": n_residual_blocks},
+            tensorboard_log=TENSORBOARD_LOG_DIR,
+            policy_kwargs={"n_residual_blocks": N_RESIDUAL_BLOCKS},
             device=device,
         )
 
     callbacks = CallbackList(
         [
             CheckpointCallback(
-                save_freq=50_000 // n_envs,
-                save_path=checkpoint_dir,
+                save_freq=50_000 // N_TRAINING_SUBPROC_ENVIRONMENTS,
+                save_path=CHECKPOINT_DIR,
                 name_prefix=out,
             ),
             GameMetricsCallback(window_size=100),
-            EvalCallback(eval_freq=100_000),
+            EvalCallback(eval_freq=EVAL_EVERY_N_STEPS),
         ]
     )
 

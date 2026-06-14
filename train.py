@@ -1,5 +1,6 @@
 from collections import deque
 
+import argparse
 import numpy as np
 import os
 import glob
@@ -8,14 +9,34 @@ import torch
 import io
 import contextlib
 import warnings
+from constants import (
+    CHECKPOINT_DIR,
+    EVAL_EVERY_N_STEPS,
+    EVAL_REPLAY_DIR,
+    MODEL_PATH,
+    N_RESIDUAL_BLOCKS,
+    N_TRAINING_SUBPROC_ENVIRONMENTS,
+    TENSORBOARD_LOG_DIR,
+    TOTAL_TRAIN_STEPS,
+    USE_CHECKPOINT_FOR_TRAINING,
+)
 from misc.log_stopper import LogStopper
 
-# Constants
-n_envs = 8
+
+def select_device() -> str:
+    """Pick the best available device. SB3's "auto" only knows cpu/cuda, so we
+    detect MPS (Apple Silicon) ourselves and fall back to cpu otherwise."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
 
 # Suppress warnings on import
 with LogStopper():
     from sb3_contrib import MaskablePPO
+    from stable_baselines3.common.utils import get_latest_run_id
     from stable_baselines3.common.vec_env import SubprocVecEnv
     from stable_baselines3.common.monitor import Monitor
     from stable_baselines3.common.callbacks import (
@@ -82,7 +103,7 @@ class GameMetricsCallback(BaseCallback):
 # Callbacks
 class EvalCallback(BaseCallback):
     def __init__(
-        self, eval_freq: int, n_episodes: int = 5, replay_dir: str = "eval_replays"
+        self, eval_freq: int, n_episodes: int = 5, replay_dir: str = EVAL_REPLAY_DIR
     ):
         super().__init__()
         self.eval_freq = eval_freq
@@ -137,26 +158,63 @@ def get_latest_checkpoint(checkpoint_dir, prefix):
 
 
 if __name__ == "__main__":
-    USE_CHECKPOINT = True
+    parser = argparse.ArgumentParser(description="Train the Crawl PPO agent.")
+    parser.add_argument(
+        "--run-name",
+        default="crawl_ppo",
+        help="Name for this run's tensorboard, checkpoint, and eval-replay dirs. "
+        "If the name is already taken (by an existing tensorboard dir), the next "
+        "free '_n' suffix is appended.",
+    )
+    args = parser.parse_args()
 
-    checkpoint_file = "ppo_crawl.zip"
     out = "ppo_crawl"
-    checkpoint_dir = "checkpoints"
-    tensorboard_log_dir = "logs/tensorboard"
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    os.makedirs(tensorboard_log_dir, exist_ok=True)
+    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+    os.makedirs(TENSORBOARD_LOG_DIR, exist_ok=True)
+
+    device = select_device()
+    print(f"Using device: {device}")
 
     with LogStopper():
-        env = SubprocVecEnv([lambda: Monitor(CrawlEnv()) for _ in range(n_envs)])
+        # fork lets workers share the parent's imported torch/kaggle_environments
+        # via copy-on-write (~5.6x less RAM than spawn), since the env's own state
+        # is <1MB. Safe here: the env forks before MaskablePPO initializes CUDA.
+        # Linux/WSL only -- not native Windows.
+        env = SubprocVecEnv(
+            [
+                lambda: Monitor(CrawlEnv())
+                for _ in range(N_TRAINING_SUBPROC_ENVIRONMENTS)
+            ],
+            start_method="fork",
+        )
     print(f"Num envs: {env.num_envs}")
 
-    dir_checkpoint = get_latest_checkpoint(checkpoint_dir, out)
-    checkpoint_file = dir_checkpoint if not dir_checkpoint is None else checkpoint_file
+    dir_checkpoint = get_latest_checkpoint(CHECKPOINT_DIR, out)
+    checkpoint_file = (
+        dir_checkpoint if dir_checkpoint is not None else MODEL_PATH + ".zip"
+    )
 
-    checkpoint_exists = USE_CHECKPOINT and os.path.exists(checkpoint_file)
+    checkpoint_exists = USE_CHECKPOINT_FOR_TRAINING and os.path.exists(checkpoint_file)
+    reset_num_timesteps = not checkpoint_exists
+
+    # Mirror SB3's tb-dir resolution so the checkpoint and eval-replay subdirs
+    # match the tensorboard run dir exactly. SB3 names the run
+    # f"{tb_log_name}_{latest_run_id + 1}", decrementing when resuming.
+    latest_run_id = get_latest_run_id(TENSORBOARD_LOG_DIR, args.run_name)
+    if not reset_num_timesteps:
+        latest_run_id -= 1
+    resolved_run_name = f"{args.run_name}_{latest_run_id + 1}"
+
+    checkpoint_dir = os.path.join(CHECKPOINT_DIR, resolved_run_name)
+    replay_dir = os.path.join(EVAL_REPLAY_DIR, resolved_run_name)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
     if checkpoint_exists:
         agent = MaskablePPO.load(
-            checkpoint_file, env=env, tensorboard_log=tensorboard_log_dir
+            checkpoint_file,
+            env=env,
+            tensorboard_log=TENSORBOARD_LOG_DIR,
+            device=device,
         )
         print(f"Resuming from {checkpoint_file}")
 
@@ -166,30 +224,35 @@ if __name__ == "__main__":
             env,
             n_steps=512,
             batch_size=512,
+            n_epochs=4,  # fewer reuse passes per batch; ~1.5x faster, retunable
             verbose=1,
-            tensorboard_log=tensorboard_log_dir,
+            gamma=0.995,
+            ent_coef=0.01,
+            tensorboard_log=TENSORBOARD_LOG_DIR,
+            policy_kwargs={"n_residual_blocks": N_RESIDUAL_BLOCKS},
+            device=device,
         )
 
     callbacks = CallbackList(
         [
             CheckpointCallback(
-                save_freq=2_000 // n_envs,
+                save_freq=50_000 // N_TRAINING_SUBPROC_ENVIRONMENTS,
                 save_path=checkpoint_dir,
                 name_prefix=out,
             ),
             GameMetricsCallback(window_size=100),
-            EvalCallback(eval_freq=2_000),
+            EvalCallback(eval_freq=EVAL_EVERY_N_STEPS, replay_dir=replay_dir),
         ]
     )
 
     try:
         agent.learn(
-            total_timesteps=int(50_000),
+            total_timesteps=int(TOTAL_TRAIN_STEPS),
             log_interval=1,
             progress_bar=True,
             callback=callbacks,
-            reset_num_timesteps=not checkpoint_exists,
-            tb_log_name="crawl_ppo",
+            reset_num_timesteps=reset_num_timesteps,
+            tb_log_name=args.run_name,
         )
 
     except Exception as e:

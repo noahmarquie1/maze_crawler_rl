@@ -3,7 +3,6 @@ from constants import (
     SCOUT_MAPPING,
     WORKER_MAPPING,
     MINER_MAPPING,
-    MAX_HEIGHT_REWARD,
     USE_NOAHS_REWARD_FUNC,
 )
 import gymnasium as gym
@@ -13,6 +12,11 @@ from kaggle_environments import make
 import os
 import contextlib
 from opponent import decision_tree_opponent
+from kaggle_patches import patch_kaggle_schema_validation
+
+# Applied at import so every SubprocVecEnv worker (which imports this module)
+# skips the redundant per-step schema validation.
+patch_kaggle_schema_validation()
 
 MAX_GAME_STEPS = 500  # Crawl runs to step 500; used to normalize the timestep stat
 
@@ -62,7 +66,7 @@ class CrawlEnv(gym.Env):
                 # 11,   factory energy (painted at the factory cell)
                 # 12,   factory move cooldown (painted at the factory cell)
                 # 13,   factory jump cooldown (painted at the factory cell)
-                "spatial": spaces.Box(0, np.inf, shape=(14, 20, 20)),
+                "spatial": spaces.Box(0, np.inf, shape=(13, 20, 20)),
                 # 0, normalized game timestep (global FiLM conditioning)
                 "stats": spaces.Box(0, 1, shape=(1,)),
             }
@@ -86,7 +90,7 @@ class CrawlEnv(gym.Env):
             "SOUTH": 4,
             "WEST": 8,
         }
-        
+
         self.visited_cells = []
 
     def make_trainer_env(self, seed=None):
@@ -175,7 +179,7 @@ class CrawlEnv(gym.Env):
         obs["spatial"][2] = ((walls & 4) != 0).astype(np.float32)
         obs["spatial"][3] = ((walls & 8) != 0).astype(np.float32)
         for cell in self.visited_cells:
-           obs["spatial"][4, cell[0], cell[1]] = 1.0
+            obs["spatial"][4, cell[0], cell[1]] = 1.0
 
         # Global stats: normalized game timestep
         obs["stats"][0] = self.timestep / MAX_GAME_STEPS
@@ -216,7 +220,6 @@ class CrawlEnv(gym.Env):
                 reward -= 30.0
             return reward
 
-
         # Invalid jump penalty
         factory_action = action.get("0-0")
         prev_factory_obs = (
@@ -228,7 +231,6 @@ class CrawlEnv(gym.Env):
             prev_jump_cooldown = prev_factory_obs[6]
             if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
                 reward -= 1.5
-
 
         # General movement reward
         prev_walls = np.array(self.prev_game_obs.walls, dtype=np.int8).reshape(20, 20)
@@ -246,7 +248,9 @@ class CrawlEnv(gym.Env):
                     cell = (row, col)
 
                     # Reward factory based on whether cell has been previously visited
-                    if (prev_walls[row, col] & self.cardinal_bitwise[action[robot]]) == 0: 
+                    if (
+                        prev_walls[row, col] & self.cardinal_bitwise[action[robot]]
+                    ) == 0:
                         if cell not in self.visited_cells:
                             reward += 0.3
                             self.visited_cells.append(cell)
@@ -262,8 +266,16 @@ class CrawlEnv(gym.Env):
 
         return reward
 
-
     def michaels_reward(self, obs, action, done):
+        LOW_HEIGHT_PENALTY = 0
+        JUMP_INVALID_PENALTY = -1
+        SURVIVAL_REWARD = 0.025
+        MAX_LINEAR_HEIGHT_REWARD = 0.025
+
+        # NO WIN/LOSS REWARD: survivial is the goal for now - win/loss is too sparse and random with our low winrate
+        WIN_REWARD = 0.0
+        LOSS_PENALTY = 0.0
+
         # Terminal win/loss plus height shaping. `action` is the per-robot action
         # dict; the factory's action is read from it for the jump penalty.
         reward = 0
@@ -271,12 +283,24 @@ class CrawlEnv(gym.Env):
             our_score = self.base_env.state[0].reward
             opponent_score = self.base_env.state[1].reward
             if our_score > opponent_score:
-                reward += 100.0
+                reward += WIN_REWARD
             elif our_score < opponent_score:
-                reward -= 100.0
-            return reward
+                reward += LOSS_PENALTY
         else:
-            reward += 1.0
+            reward += SURVIVAL_REWARD
+
+        curr_factory_obs = obs.robots.get("0-0")
+        if curr_factory_obs is not None:
+            # Reward being higher on the board linearly
+            board_height = 20
+            row = curr_factory_obs[2]
+            relative_height = (row - obs.southBound) / board_height
+            reward += MAX_LINEAR_HEIGHT_REWARD * relative_height
+
+            # Penalize being close to the bottom of the board
+            is_close_to_bottom = (row - obs.southBound) < 3
+            if is_close_to_bottom:
+                reward += LOW_HEIGHT_PENALTY
 
         # Penalize invalid jumps using the pre-step factory jump cooldown
         factory_action = action.get("0-0")
@@ -288,18 +312,7 @@ class CrawlEnv(gym.Env):
         if factory_action is not None and prev_factory_obs is not None:
             prev_jump_cooldown = prev_factory_obs[6]
             if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
-                reward -= 2.0
-
-        curr_factory_obs = obs.robots.get("0-0")
-        if curr_factory_obs is not None:
-            board_height = 20
-            row = curr_factory_obs[2]
-            relative_height = (row - obs.southBound) / board_height
-            reward += MAX_HEIGHT_REWARD * relative_height
-
-            is_close_to_bottom = row - obs.southBound < 3
-            if is_close_to_bottom:
-                reward -= 2.0
+                reward += JUMP_INVALID_PENALTY
 
         return reward
 

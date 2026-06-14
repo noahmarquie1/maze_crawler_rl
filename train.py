@@ -17,6 +17,7 @@ from constants import (
     N_RESIDUAL_BLOCKS,
     N_TRAINING_SUBPROC_ENVIRONMENTS,
     TENSORBOARD_LOG_DIR,
+    TOTAL_TRAIN_STEPS,
     USE_CHECKPOINT_FOR_TRAINING,
 )
 from misc.log_stopper import LogStopper
@@ -246,7 +247,7 @@ if __name__ == "__main__":
 
     try:
         agent.learn(
-            total_timesteps=int(1e6),
+            total_timesteps=int(TOTAL_TRAIN_STEPS),
             log_interval=1,
             progress_bar=True,
             callback=callbacks,

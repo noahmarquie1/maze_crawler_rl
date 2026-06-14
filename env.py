@@ -235,7 +235,7 @@ class CrawlEnv(gym.Env):
         return reward
 
     def michaels_reward(self, obs, action, done):
-        LOW_HEIGHT_PENALTY = -1
+        LOW_HEIGHT_PENALTY = 0
         JUMP_INVALID_PENALTY = -1
         SURVIVAL_REWARD = 0.025
         MAX_LINEAR_HEIGHT_REWARD = 0.025
@@ -257,15 +257,16 @@ class CrawlEnv(gym.Env):
         else:
             reward += SURVIVAL_REWARD
 
-        # Penalize being close to the bottom and reward height using the current factory row
         curr_factory_obs = obs.robots.get("0-0")
         if curr_factory_obs is not None:
+            # Reward being higher on the board linearly
             board_height = 20
             row = curr_factory_obs[2]
             relative_height = (row - obs.southBound) / board_height
             reward += MAX_LINEAR_HEIGHT_REWARD * relative_height
 
-            is_close_to_bottom = row - obs.southBound < 3
+            # Penalize being close to the bottom of the board
+            is_close_to_bottom = (row - obs.southBound) < 3
             if is_close_to_bottom:
                 reward += LOW_HEIGHT_PENALTY
 

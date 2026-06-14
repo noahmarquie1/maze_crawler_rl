@@ -66,7 +66,7 @@ class CrawlEnv(gym.Env):
                 # 11,   factory energy (painted at the factory cell)
                 # 12,   factory move cooldown (painted at the factory cell)
                 # 13,   factory jump cooldown (painted at the factory cell)
-                "spatial": spaces.Box(0, np.inf, shape=(14, 20, 20)),
+                "spatial": spaces.Box(0, np.inf, shape=(13, 20, 20)),
                 # 0, normalized game timestep (global FiLM conditioning)
                 "stats": spaces.Box(0, 1, shape=(1,)),
             }
@@ -90,7 +90,7 @@ class CrawlEnv(gym.Env):
             "SOUTH": 4,
             "WEST": 8,
         }
-        
+
         self.visited_cells = []
 
     def make_trainer_env(self, seed=None):
@@ -179,7 +179,7 @@ class CrawlEnv(gym.Env):
         obs["spatial"][2] = ((walls & 4) != 0).astype(np.float32)
         obs["spatial"][3] = ((walls & 8) != 0).astype(np.float32)
         for cell in self.visited_cells:
-           obs["spatial"][4, cell[0], cell[1]] = 1.0
+            obs["spatial"][4, cell[0], cell[1]] = 1.0
 
         # Global stats: normalized game timestep
         obs["stats"][0] = self.timestep / MAX_GAME_STEPS
@@ -220,7 +220,6 @@ class CrawlEnv(gym.Env):
                 reward -= 30.0
             return reward
 
-
         # Invalid jump penalty
         factory_action = action.get("0-0")
         prev_factory_obs = (
@@ -232,7 +231,6 @@ class CrawlEnv(gym.Env):
             prev_jump_cooldown = prev_factory_obs[6]
             if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
                 reward -= 1.5
-
 
         # General movement reward
         prev_walls = np.array(self.prev_game_obs.walls, dtype=np.int8).reshape(20, 20)
@@ -250,7 +248,9 @@ class CrawlEnv(gym.Env):
                     cell = (row, col)
 
                     # Reward factory based on whether cell has been previously visited
-                    if (prev_walls[row, col] & self.cardinal_bitwise[action[robot]]) == 0: 
+                    if (
+                        prev_walls[row, col] & self.cardinal_bitwise[action[robot]]
+                    ) == 0:
                         if cell not in self.visited_cells:
                             reward += 0.3
                             self.visited_cells.append(cell)
@@ -265,7 +265,6 @@ class CrawlEnv(gym.Env):
                     reward -= 0.05  # Idle is not the worst thing in the world but unideal, penalized
 
         return reward
-
 
     def michaels_reward(self, obs, action, done):
         LOW_HEIGHT_PENALTY = 0

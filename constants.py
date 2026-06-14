@@ -8,7 +8,7 @@ CHECKPOINT_DIR = "checkpoints"
 TENSORBOARD_LOG_DIR = "logs/tensorboard"
 
 # Training
-N_TRAINING_SUBPROC_ENVIRONMENTS = 16
+N_TRAINING_SUBPROC_ENVIRONMENTS = 20
 EVAL_EVERY_N_STEPS = 100_000
 
 # - - - Hyperparamaters  - - -

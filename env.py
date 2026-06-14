@@ -244,18 +244,6 @@ class CrawlEnv(gym.Env):
         else:
             reward += 0.5
 
-        # Penalize invalid jumps using the pre-step factory jump cooldown
-        factory_action = action.get("0-0")
-        prev_factory_obs = (
-            self.prev_game_obs.robots.get("0-0")
-            if self.prev_game_obs is not None
-            else None
-        )
-        if factory_action is not None and prev_factory_obs is not None:
-            prev_jump_cooldown = prev_factory_obs[6]
-            if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
-                reward -= 2.0
-
         # Penalize being close to the bottom and reward height using the current factory row
         curr_factory_obs = obs.robots.get("0-0")
         if curr_factory_obs is not None:
@@ -267,6 +255,18 @@ class CrawlEnv(gym.Env):
             is_close_to_bottom = row - obs.southBound < 3
             if is_close_to_bottom:
                 reward -= 5.0
+
+        # Penalize invalid jumps using the pre-step factory jump cooldown
+        factory_action = action.get("0-0")
+        prev_factory_obs = (
+            self.prev_game_obs.robots.get("0-0")
+            if self.prev_game_obs is not None
+            else None
+        )
+        if factory_action is not None and prev_factory_obs is not None:
+            prev_jump_cooldown = prev_factory_obs[6]
+            if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
+                reward -= 2.0
 
         return reward
 

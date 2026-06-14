@@ -162,11 +162,16 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     with LogStopper():
+        # fork lets workers share the parent's imported torch/kaggle_environments
+        # via copy-on-write (~5.6x less RAM than spawn), since the env's own state
+        # is <1MB. Safe here: the env forks before MaskablePPO initializes CUDA.
+        # Linux/WSL only -- not native Windows.
         env = SubprocVecEnv(
             [
                 lambda: Monitor(CrawlEnv())
                 for _ in range(N_TRAINING_SUBPROC_ENVIRONMENTS)
-            ]
+            ],
+            start_method="fork",
         )
     print(f"Num envs: {env.num_envs}")
 

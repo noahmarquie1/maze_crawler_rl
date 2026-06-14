@@ -11,7 +11,7 @@ import warnings
 from misc.log_stopper import LogStopper
 
 # Constants
-n_envs = 16
+n_envs = 8
 
 # Suppress warnings on import
 with LogStopper():
@@ -137,7 +137,7 @@ def get_latest_checkpoint(checkpoint_dir, prefix):
 
 
 if __name__ == "__main__":
-    USE_CHECKPOINT = False
+    USE_CHECKPOINT = True
 
     checkpoint_file = "ppo_crawl.zip"
     out = "ppo_crawl"
@@ -173,18 +173,18 @@ if __name__ == "__main__":
     callbacks = CallbackList(
         [
             CheckpointCallback(
-                save_freq=50_000 // n_envs,
+                save_freq=2_000 // n_envs,
                 save_path=checkpoint_dir,
                 name_prefix=out,
             ),
             GameMetricsCallback(window_size=100),
-            EvalCallback(eval_freq=100_000),
+            EvalCallback(eval_freq=2_000),
         ]
     )
 
     try:
         agent.learn(
-            total_timesteps=int(3e6),
+            total_timesteps=int(50_000),
             log_interval=1,
             progress_bar=True,
             callback=callbacks,

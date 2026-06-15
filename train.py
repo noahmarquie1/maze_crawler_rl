@@ -23,16 +23,6 @@ from constants import (
 from misc.log_stopper import LogStopper
 
 
-def select_device() -> str:
-    """Pick the best available device. SB3's "auto" only knows cpu/cuda, so we
-    detect MPS (Apple Silicon) ourselves and fall back to cpu otherwise."""
-    if torch.cuda.is_available():
-        return "cuda"
-    if torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
-
-
 # Suppress warnings on import
 with LogStopper():
     from sb3_contrib import MaskablePPO
@@ -46,7 +36,7 @@ with LogStopper():
     )
     from model import CrawlMaskablePolicy
     from env import CrawlEnv
-    from evaluate_model import run_n_episodes
+    from evaluate_model import load_model, run_n_episodes, select_device
 
 
 class GameMetricsCallback(BaseCallback):
@@ -210,7 +200,7 @@ if __name__ == "__main__":
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     if checkpoint_exists:
-        agent = MaskablePPO.load(
+        agent = load_model(
             checkpoint_file,
             env=env,
             tensorboard_log=TENSORBOARD_LOG_DIR,

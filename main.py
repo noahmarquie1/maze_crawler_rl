@@ -20,140 +20,47 @@ OBS_DIM = 20*20*10 + 4
 ACTION_DIM = 13*400
 
 
-# Custom Policy Class
-class PureCNNFeatureExtractor(nn.Module):
-    def __init__(
-        self,
-        spatial_shape: tuple = (10, 20, 20),
-        metadata_dim: int = 4,           
-        features_dim: int = 128,
-        cnn_head_dim: int = 64,
-        metadata_head_dim: int = 4,
-    ):
-        super(PureCNNFeatureExtractor, self).__init__()
+class InferenceWrapper(torch.nn.Module):
+    def __init__(self, policy):
+        super().__init__()
+        self.pi_extractor = policy.pi_features_extractor
+        self.action_net   = policy.action_net
 
-        self.cnn = nn.Sequential(
-            nn.LazyConv2d(8, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.LazyConv2d(16, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.LazyConv2d(4, kernel_size=1, stride=1),
-            nn.ReLU(),
-            nn.Flatten(),
-        )
-
-        with torch.no_grad():
-            sample_input = torch.zeros((1, *spatial_shape))
-            cnn_output_dim = self.cnn(sample_input).shape[1]
-
-        self.cnn_head = nn.Sequential(
-            nn.Linear(cnn_output_dim, cnn_head_dim),
-            nn.ReLU(),
-        )
-        self.metadata_head = nn.Sequential(
-            nn.Linear(metadata_dim, metadata_head_dim),
-            nn.ReLU(),
-        )
-
-        self.linear = nn.Sequential(
-            nn.Linear(cnn_head_dim + metadata_head_dim, features_dim),
-            nn.ReLU(),
-        )
-
-    def forward(self, observations: Mapping[str, torch.Tensor]) -> torch.Tensor:
-        cnn_features = self.cnn(observations["spatial"])
-        cnn_out = self.cnn_head(cnn_features)
-        metadata_out = self.metadata_head(observations["stats"])
-        return self.linear(torch.concat((cnn_out, metadata_out), dim=1))
-
-
-# 2. The Complete Actor Network
-class KaggleActor(nn.Module):
-    def __init__(self, action_dim=13*400):
-        super(KaggleActor, self).__init__()
-        
-        self.features_extractor = PureCNNFeatureExtractor()
-        
-        self.policy_net = nn.Sequential(
-            nn.Linear(128, 64),
-            nn.Tanh(),
-            nn.Linear(64, 64),
-            nn.Tanh()
-        )
-        
-        self.action_net = nn.Linear(64, action_dim)
-
-    def forward(self, observations: Mapping[str, torch.Tensor]) -> torch.Tensor:
-        features = self.features_extractor(observations)
-        hidden = self.policy_net(features)
-        action_logits = self.action_net(hidden)
-        return action_logits
+    def forward(self, spatial: torch.Tensor, stats: torch.Tensor) -> torch.Tensor:
+        obs = {"spatial": spatial, "stats": stats}
+        trunk  = self.pi_extractor(obs)
+        logits = self.action_net(trunk)
+        return logits
 
 
 if __name__ == "__main__":
     BASE_DIR = ""
     from sb3_contrib import MaskablePPO
     model = MaskablePPO.load("ppo_crawl.zip", env=rl_env)
-    torch.save(model.policy.state_dict(), "policy_weights.pt")
+    p = model.policy
+    p.eval()
+    wrapper = InferenceWrapper(p)
+    wrapper.eval()
+
+    example_spatial = torch.zeros(1, 13, 20, 20)
+    example_stats   = torch.zeros(1, 1)
+
+    traced = torch.jit.trace(wrapper, (example_spatial, example_stats))
+    traced.save("policy_traced.pt")
+
 else:
     BASE_DIR = "/kaggle_simulations/agent"
+    _policy = torch.jit.load(
+        os.path.join(BASE_DIR, "policy_traced.pt"), map_location="cpu"
+    )
+    _policy.eval()
 
+    def agent(obs, config):
+        rl_obs  = rl_env.format_obs(obs)
+        spatial = torch.tensor(rl_obs["spatial"], dtype=torch.float32).unsqueeze(0)
+        stats   = torch.tensor(rl_obs["stats"],   dtype=torch.float32).unsqueeze(0)
+        with torch.no_grad():
+            logits = _policy(spatial, stats)
+        action = logits.squeeze(0).view(400, 13).argmax(dim=-1).numpy()
+        return game_agent(obs, action)
 
-# Custom RL Setup
-policy = KaggleActor()
-
-policy.load_state_dict(
-    torch.load(os.path.join(BASE_DIR, "policy_weights.pt")), 
-    strict=False
-)
-policy.eval()
-
-
-def rl_agent(obs_dict) -> np.ndarray: 
-    tensor_obs = {
-        key: torch.tensor(value, dtype=torch.float32).unsqueeze(0) 
-        for key, value in obs_dict.items()
-    }
-    with torch.no_grad():
-        action_logits = policy(tensor_obs)
-        
-    action = action_logits.squeeze(0).view(400, 13).argmax(dim=-1).numpy()
-    return action
-
-
-def agent(obs, config): # Main kaggle agent
-    rl_obs = rl_env.format_obs(obs)
-    flattened_obs = np.append(rl_obs['spatial'].flatten(), rl_obs['stats'], axis=0)
-    agent_action = rl_agent(rl_obs)
-    return game_agent(obs, agent_action)
-
-
-# Main Loop - for Debugging
-DEBUG = True
-
-
-if __name__ == "__main__":
-    #from sb3_contrib import MaskablePPO
-    #model = MaskablePPO.load("checkpoints/ppo_crawl_200000_steps.zip", env=rl_env)
-    #torch.save(model.policy.state_dict(), "policy_weights.pt")
-    with contextlib.redirect_stdout(open(os.devnull, 'w')):
-        kaggle_env = make("crawl")
-
-    if not DEBUG:
-        kaggle_env.run([agent, decision_tree_opponent])
-
-    # Optional - debugging mode (does not render)
-    else:
-        trainer = kaggle_env.train([None, decision_tree_opponent])
-        obs = trainer.reset()
-        done = False
-        while not done:
-            action = agent(obs, None)
-            obs, reward, done, info = trainer.step(action)
-
-
-    html_out = kaggle_env.render(mode="html", width=800, height=800)
-    with open("replay.html", "w") as f:
-        f.write(html_out)
-
-    print(f"Game finished successfully. Written to replay.html")

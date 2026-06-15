@@ -4,6 +4,7 @@ from constants import (
     WORKER_MAPPING,
     MINER_MAPPING,
     USE_NOAHS_REWARD_FUNC,
+    MAX_CRYSTAL_ENERGY,
 )
 import gymnasium as gym
 import numpy as np
@@ -60,7 +61,7 @@ class CrawlEnv(gym.Env):
             {
                 # 0-3,  walls n, e, s, w
                 # 5-8,  robots factory, scout, worker, miner
-                # 9,    crystals
+                # 9,    crystals (energy normalized by MAX_CRYSTAL_ENERGY)
                 # 10,    mines
                 # 11,   factory energy (painted at the factory cell)
                 # 12,   factory move cooldown (painted at the factory cell)
@@ -136,7 +137,7 @@ class CrawlEnv(gym.Env):
             # Spatial is:
             # 1. (0-3) walls
             # 3. (4-7) robot types
-            # 4. (8) crystals
+            # 4. (8) crystals (energy normalized by MAX_CRYSTAL_ENERGY)
             # 5. (9) mines
             # 6. (10) factory energy, painted at the factory cell
             # 7. (11) factory move cooldown, painted at the factory cell
@@ -163,7 +164,7 @@ class CrawlEnv(gym.Env):
         for coord, energy in base_obs.crystals.items():
             row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
             col = min(int(coord.split(",")[0]), 19)
-            obs["spatial"][8, row, col] = 1
+            obs["spatial"][8, row, col] = energy / MAX_CRYSTAL_ENERGY
 
         for coord, info in base_obs.mines.items():
             row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
@@ -263,9 +264,12 @@ class CrawlEnv(gym.Env):
 
     def michaels_reward(self, obs, action, done):
         LOW_HEIGHT_PENALTY = 0
-        JUMP_INVALID_PENALTY = -1
-        SURVIVAL_REWARD = 0.025
-        MAX_LINEAR_HEIGHT_REWARD = 0.025
+        JUMP_INVALID_PENALTY = -0.5
+        SURVIVAL_REWARD = 0.01
+        MAX_LINEAR_HEIGHT_REWARD = 0.01
+        # Reward for consuming a full (MAX_CRYSTAL_ENERGY) crystal; scaled linearly
+        # by the consumed crystal's energy.
+        MAX_CRYSTAL_REWARD = 0.1
 
         # NO WIN/LOSS REWARD: survivial is the goal for now - win/loss is too sparse and random with our low winrate
         WIN_REWARD = 0.0
@@ -308,6 +312,22 @@ class CrawlEnv(gym.Env):
             prev_jump_cooldown = prev_factory_obs[6]
             if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
                 reward += JUMP_INVALID_PENALTY
+
+        # Reward consuming crystals: a crystal visible last step that is gone now and
+        # has one of our robots standing on its cell was picked up by us. Crystal and
+        # robot coordinates are both absolute (col, row).
+        if self.prev_game_obs is not None:
+            our_robot_cells = {
+                (int(r[1]), int(r[2]))
+                for r in obs.robots.values()
+                if r[4] == obs.player
+            }
+            for coord, energy in self.prev_game_obs.crystals.items():
+                if coord in obs.crystals:
+                    continue
+                col, row = int(coord.split(",")[0]), int(coord.split(",")[1])
+                if (col, row) in our_robot_cells:
+                    reward += MAX_CRYSTAL_REWARD * (energy / MAX_CRYSTAL_ENERGY)
 
         return reward
 

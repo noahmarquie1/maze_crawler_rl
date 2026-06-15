@@ -1,6 +1,10 @@
 USE_CHECKPOINT_FOR_TRAINING = False
 DEBUG = False
 
+# Game constant: a crystal holds at most 50 energy. Used to normalize the crystal
+# observation channel and the crystal-consumption reward.
+MAX_CRYSTAL_ENERGY = 50
+
 # Outputs
 MODEL_PATH = "ppo_crawl"
 REPLAY_OUTPUT_DIR = "output_replays"

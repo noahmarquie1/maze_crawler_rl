@@ -51,6 +51,102 @@ def game_agent(obs, agent_action):
     return actions
 
 
+def format_obs(base_obs, timestep):
+    """Build the policy's Dict observation from a raw Crawl observation.
+
+    Pure function of the engine observation and the current ``timestep`` so it can
+    be reused both by ``CrawlEnv`` during training and by the Kaggle submission
+    agent, which has no ``CrawlEnv`` instance. Shape: spatial (C=13, H=20, W=20)
+    channels-first for the CNN; stats (1,) holds the normalized timestep.
+    """
+    obs = {
+        # Spatial is:
+        # 1. (0-3) walls
+        # 3. (4-7) robot types
+        # 4. (8) crystals
+        # 5. (9) mines
+        # 6. (10) factory energy, painted at the factory cell
+        # 7. (11) factory move cooldown, painted at the factory cell
+        # 8. (12) factory jump cooldown, painted at the factory cell
+        "spatial": np.zeros((13, 20, 20), dtype=np.float32),
+        # Stats are:
+        # 1. normalized game timestep
+        "stats": np.zeros((1,), dtype=np.float32),
+    }
+    for robot, robot_obs in base_obs.robots.items():
+        if robot_obs[4] != base_obs.player:
+            continue
+
+        type = robot_obs[0]
+        row = min(int(robot_obs[2]) - int(base_obs.southBound), 19)
+        col = min(int(robot_obs[1]), 19)
+        obs["spatial"][4 + type, row, col] = 1
+
+        if robot == "0-0":
+            obs["spatial"][10, row, col] = robot_obs[3] / 1000  # factory energy
+            obs["spatial"][11, row, col] = robot_obs[5] / 10  # factory move cd
+            obs["spatial"][12, row, col] = robot_obs[6] / 10  # factory jump cd
+
+    for coord, energy in base_obs.crystals.items():
+        row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
+        col = min(int(coord.split(",")[0]), 19)
+        obs["spatial"][8, row, col] = 1
+
+    for coord, info in base_obs.mines.items():
+        row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
+        col = min(int(coord.split(",")[0]), 19)
+        obs["spatial"][9, row, col] = 1
+
+    # Wall information
+    walls = np.array(base_obs.walls, dtype=np.int8).reshape(20, 20)
+    obs["spatial"][0] = ((walls & 1) != 0).astype(np.float32)
+    obs["spatial"][1] = ((walls & 2) != 0).astype(np.float32)
+    obs["spatial"][2] = ((walls & 4) != 0).astype(np.float32)
+    obs["spatial"][3] = ((walls & 8) != 0).astype(np.float32)
+
+    # Global stats: normalized game timestep
+    obs["stats"][0] = timestep / MAX_GAME_STEPS
+    return obs
+
+
+def compute_action_masks(base_obs):
+    """Flat per-cell action mask for the player's robots in ``base_obs``.
+
+    Pure function (no ``CrawlEnv`` state) so the submission agent can mask its
+    policy logits identically to training. Returns a flattened (400 * 13,) bool
+    array ordered ``cell * 13 + action_type``.
+    """
+    mask = np.zeros((400, 13), dtype=bool)
+    mask[:, 0] = True  # "IDLE" always valid
+
+    type_valid_actions = {
+        0: [a for a in range(12) if a != 5],  # Factory: 0-11 minus BUILD_SCOUT(5)
+        1: range(5),  # Scout: 0-4
+        2: range(13),  # Worker: 0-12
+        3: range(6),  # Miner: 0-5
+    }
+
+    for robot, robot_obs in base_obs.robots.items():
+        rtype, col, row, energy, owner = (
+            int(robot_obs[0]),
+            int(robot_obs[1]),
+            int(robot_obs[2]),
+            robot_obs[3],
+            robot_obs[4],
+        )
+        if owner != base_obs.player:
+            continue
+
+        row = min(int(robot_obs[2]) - int(base_obs.southBound), 19)
+        col = min(int(robot_obs[1]), 19)
+
+        idx = row * 20 + col
+        mask[idx, :] = False
+        mask[idx, list(type_valid_actions[rtype])] = True
+
+    return mask.flatten()
+
+
 class CrawlEnv(gym.Env):
     def __init__(self):
         super().__init__()
@@ -101,86 +197,10 @@ class CrawlEnv(gym.Env):
         self.game_obs = self.trainer.reset()
 
     def action_masks(self):
-        mask = np.zeros((400, 13), dtype=bool)
-        mask[:, 0] = True  # "IDLE" always valid
-
-        type_valid_actions = {
-            0: [a for a in range(12) if a != 5],  # Factory: 0-11 minus BUILD_SCOUT(5)
-            1: range(5),  # Scout: 0-4
-            2: range(13),  # Worker: 0-12
-            3: range(6),  # Miner: 0-5
-        }
-
-        for robot, robot_obs in self.game_obs.robots.items():
-            rtype, col, row, energy, owner = (
-                int(robot_obs[0]),
-                int(robot_obs[1]),
-                int(robot_obs[2]),
-                robot_obs[3],
-                robot_obs[4],
-            )
-            if owner != self.game_obs.player:
-                continue
-
-            row = min(int(robot_obs[2]) - int(self.game_obs.southBound), 19)
-            col = min(int(robot_obs[1]), 19)
-
-            idx = row * 20 + col
-            mask[idx, :] = False
-            mask[idx, list(type_valid_actions[rtype])] = True
-
-        return mask.flatten()
+        return compute_action_masks(self.game_obs)
 
     def format_obs(self, base_obs):
-        # Shape: (C=10, H=20, W=20) — channels-first for PyTorch CNN
-        obs = {
-            # Spatial is:
-            # 1. (0-3) walls
-            # 3. (4-7) robot types
-            # 4. (8) crystals (energy normalized by MAX_CRYSTAL_ENERGY)
-            # 5. (9) mines
-            # 6. (10) factory energy, painted at the factory cell
-            # 7. (11) factory move cooldown, painted at the factory cell
-            # 8. (12) factory jump cooldown, painted at the factory cell
-            "spatial": np.zeros((13, 20, 20), dtype=np.float32),
-            # Stats are:
-            # 1. normalized game timestep
-            "stats": np.zeros((1,), dtype=np.float32),
-        }
-        for robot, robot_obs in base_obs.robots.items():
-            if robot_obs[4] != base_obs.player:
-                continue
-
-            type = robot_obs[0]
-            row = min(int(robot_obs[2]) - int(base_obs.southBound), 19)
-            col = min(int(robot_obs[1]), 19)
-            obs["spatial"][4 + type, row, col] = 1
-
-            if robot == "0-0":
-                obs["spatial"][10, row, col] = robot_obs[3] / 1000  # factory energy
-                obs["spatial"][11, row, col] = robot_obs[5] / 10  # factory move cd
-                obs["spatial"][12, row, col] = robot_obs[6] / 10  # factory jump cd
-
-        for coord, energy in base_obs.crystals.items():
-            row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
-            col = min(int(coord.split(",")[0]), 19)
-            obs["spatial"][8, row, col] = energy / MAX_CRYSTAL_ENERGY
-
-        for coord, info in base_obs.mines.items():
-            row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
-            col = min(int(coord.split(",")[0]), 19)
-            obs["spatial"][9, row, col] = 1
-
-        # Wall information
-        walls = np.array(base_obs.walls, dtype=np.int8).reshape(20, 20)
-        obs["spatial"][0] = ((walls & 1) != 0).astype(np.float32)
-        obs["spatial"][1] = ((walls & 2) != 0).astype(np.float32)
-        obs["spatial"][2] = ((walls & 4) != 0).astype(np.float32)
-        obs["spatial"][3] = ((walls & 8) != 0).astype(np.float32)
-
-        # Global stats: normalized game timestep
-        obs["stats"][0] = self.timestep / MAX_GAME_STEPS
-        return obs
+        return format_obs(base_obs, self.timestep)
 
     def detect_outcome(self, done, info):
         # Win/loss/draw detection runs regardless of the active reward function so

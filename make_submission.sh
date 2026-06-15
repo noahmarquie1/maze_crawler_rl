@@ -20,7 +20,11 @@ fi
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
-cp main.py model.py env.py constants.py opponent.py kaggle_patches.py "$STAGE/"
+# Kaggle requires the entrypoint to be main.py at the tarball root, so our
+# submission_agent.py is staged under that name (keeps the repo's main.py free
+# for other uses).
+cp submission_agent.py "$STAGE/main.py"
+cp model.py env.py constants.py opponent.py kaggle_patches.py "$STAGE/"
 cp "$MODEL_ZIP" "$STAGE/ppo_crawl.zip"
 
 # Vendor sb3_contrib (absent in the runtime) and stable_baselines3 (mismatched

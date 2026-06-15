@@ -13,8 +13,8 @@ import os
 import sys
 import types
 
-# When the agent runs in the competition the tarball is unpacked here; running
-# main.py locally resolves assets next to this file instead.
+# In the competition the tarball is unpacked here (this file staged as main.py);
+# running this file locally resolves assets next to it instead.
 _AGENT_DIR = "/kaggle_simulations/agent"
 BASE_DIR = (
     _AGENT_DIR if os.path.isdir(_AGENT_DIR) else os.path.dirname(os.path.abspath(__file__))

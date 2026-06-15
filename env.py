@@ -99,10 +99,12 @@ def format_obs(base_obs, timestep):
 
     # Wall information
     walls = np.array(base_obs.walls, dtype=np.int8).reshape(20, 20)
-    obs["spatial"][0] = ((walls & 1) != 0).astype(np.float32)
-    obs["spatial"][1] = ((walls & 2) != 0).astype(np.float32)
-    obs["spatial"][2] = ((walls & 4) != 0).astype(np.float32)
-    obs["spatial"][3] = ((walls & 8) != 0).astype(np.float32)
+    fog = (walls == -1)
+
+    obs["spatial"][0] = np.where(fog, -1, ((walls & 1) != 0)).astype(np.float32)
+    obs["spatial"][1] = np.where(fog, -1, ((walls & 2) != 0)).astype(np.float32)
+    obs["spatial"][2] = np.where(fog, -1, ((walls & 4) != 0)).astype(np.float32)
+    obs["spatial"][3] = np.where(fog, -1, ((walls & 8) != 0)).astype(np.float32)
 
     # Global stats: normalized game timestep
     obs["stats"][0] = timestep / MAX_GAME_STEPS
@@ -162,7 +164,7 @@ class CrawlEnv(gym.Env):
                 # 11,   factory energy (painted at the factory cell)
                 # 12,   factory move cooldown (painted at the factory cell)
                 # 13,   factory jump cooldown (painted at the factory cell)
-                "spatial": spaces.Box(0, np.inf, shape=(13, 20, 20)),
+                "spatial": spaces.Box(-1, np.inf, shape=(13, 20, 20)),
                 # 0, normalized game timestep (global FiLM conditioning)
                 "stats": spaces.Box(0, 1, shape=(1,)),
             }
@@ -222,21 +224,67 @@ class CrawlEnv(gym.Env):
         info["final_scores"] = [our_score, opponent_score]
 
     def noahs_reward(self, obs, action, done):
-        # Obs are formatted how Kaggle provides them
-        # Action follows Kaggle formatting as well (per-robot action strings)
+        LOW_HEIGHT_PENALTY = 0
+        JUMP_INVALID_PENALTY = -0.5
+        SURVIVAL_REWARD = 0.01
+        MAX_LINEAR_HEIGHT_REWARD = 0.01
+        # Reward for the factory gaining a full crystal's worth (MAX_CRYSTAL_ENERGY)
+        # of energy in a step; scaled linearly by the energy gained.
+        MAX_ENERGY_REWARD = 0.1
+        # Reward for building a worker once scrolling hits 1/turn (after step 400).
+        WORKER_BUILD_REWARD = 0.1
+        WORKER_BUILD_STEP = 400
+        # Penalize the factory running low on energy reserves.
+        LOW_ENERGY_PENALTY = -0.05
+        LOW_ENERGY_THRESHOLD = 200
+        # Penalize the factory being within L1 distance of an enemy robot (crush risk).
+        ENEMY_PROXIMITY_PENALTY = -0.1
+        ENEMY_PROXIMITY_L1 = 2
 
-        # Terminal reward or penalty
+        # NO WIN/LOSS REWARD: survivial is the goal for now - win/loss is too sparse and random with our low winrate
+        WIN_REWARD = 0.0
+        LOSS_PENALTY = 0.0
+
+        # Terminal win/loss plus height shaping. `action` is the per-robot action
+        # dict; the factory's action is read from it for the jump penalty.
         reward = 0
         if done:
             our_score = self.base_env.state[0].reward
             opponent_score = self.base_env.state[1].reward
             if our_score > opponent_score:
-                reward += 30.0
+                reward += WIN_REWARD
             elif our_score < opponent_score:
-                reward -= 30.0
-            return reward
+                reward += LOSS_PENALTY
+        else:
+            reward += SURVIVAL_REWARD
 
-        # Invalid jump penalty
+        curr_factory_obs = obs.robots.get("0-0")
+        if curr_factory_obs is not None:
+            # Reward being higher on the board linearly
+            board_height = 20
+            row = curr_factory_obs[2]
+            relative_height = (row - obs.southBound) / board_height
+            reward += MAX_LINEAR_HEIGHT_REWARD * relative_height
+
+            # Penalize being close to the bottom of the board
+            is_close_to_bottom = (row - obs.southBound) < 3
+            if is_close_to_bottom:
+                reward += LOW_HEIGHT_PENALTY
+
+            # Penalize low factory energy reserves
+            if curr_factory_obs[3] < LOW_ENERGY_THRESHOLD:
+                reward += LOW_ENERGY_PENALTY
+
+            # Penalize an enemy robot getting close to the factory (crush risk)
+            fcol, frow = int(curr_factory_obs[1]), int(curr_factory_obs[2])
+            for r in obs.robots.values():
+                if r[4] == obs.player:
+                    continue
+                if abs(int(r[1]) - fcol) + abs(int(r[2]) - frow) <= ENEMY_PROXIMITY_L1:
+                    reward += ENEMY_PROXIMITY_PENALTY
+                    break
+
+        # Penalize invalid jumps using the pre-step factory jump cooldown
         factory_action = action.get("0-0")
         prev_factory_obs = (
             self.prev_game_obs.robots.get("0-0")
@@ -246,41 +294,36 @@ class CrawlEnv(gym.Env):
         if factory_action is not None and prev_factory_obs is not None:
             prev_jump_cooldown = prev_factory_obs[6]
             if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
-                reward -= 1.5
+                reward += JUMP_INVALID_PENALTY
 
-        # General movement reward
-        prev_walls = np.array(self.prev_game_obs.walls, dtype=np.int8).reshape(20, 20)
-        for robot, robot_obs in obs.robots.items():
-            if robot_obs[4] != obs.player:
-                continue
+        # Reward the factory gaining energy (crystals transferred in, mine income).
+        # Only positive deltas count, so spending energy on builds is not penalized.
+        if self.prev_game_obs is not None:
+            prev_factory_obs = self.prev_game_obs.robots.get("0-0")
+            curr_factory_obs = obs.robots.get("0-0")
 
-            row = min(int(robot_obs[2]) - int(obs.southBound), 19)
-            col = min(int(robot_obs[1]), 19)
+            # reward newly discovered walls
+            curr_walls = np.array(obs.walls, dtype=np.int8)
+            prev_walls = np.array(self.prev_game_obs.walls, dtype=np.int8)
+            newly_discovered = int(np.sum((prev_walls == -1) & (curr_walls != -1)))
+            reward += 0.05 * newly_discovered
 
-            if robot == "0-0":  # Factory
-                if "JUMP" in action[robot]:
-                    reward -= 0.5  # Jumping is costly and should be avoided
-                elif action[robot] in self.cardinal:
-                    cell = (row, col)
+            if prev_factory_obs is not None and curr_factory_obs is not None:
+                energy_gain = curr_factory_obs[3] - prev_factory_obs[3]
+                if energy_gain > 0:
+                    reward += MAX_ENERGY_REWARD * (energy_gain / MAX_CRYSTAL_ENERGY)
 
-                    # Reward factory based on whether cell has been previously visited
-                    if (
-                        prev_walls[row, col] & self.cardinal_bitwise[action[robot]]
-                    ) == 0:
-                        if cell not in self.visited_cells:
-                            reward += 0.3
-                            self.visited_cells.append(cell)
-                            if action[robot] == "NORTH":
-                                reward += 0.1
-                        else:
-                            reward -= 0.1
-
-                    else:
-                        reward -= 0.3  # penalty for bumping into a wall
-                elif action[robot] == "IDLE":
-                    reward -= 0.05  # Idle is not the worst thing in the world but unideal, penalized
+        # Reward building workers late game (after scrolling hits 1/turn). Counting
+        # net new workers avoids rewarding failed/spammed BUILD_WORKER attempts.
+        if self.timestep > WORKER_BUILD_STEP and self.prev_game_obs is not None:
+            new_workers = self._our_worker_count(obs) - self._our_worker_count(
+                self.prev_game_obs
+            )
+            if new_workers > 0:
+                reward += WORKER_BUILD_REWARD * new_workers
 
         return reward
+
 
     def michaels_reward(self, obs, action, done):
         LOW_HEIGHT_PENALTY = 0

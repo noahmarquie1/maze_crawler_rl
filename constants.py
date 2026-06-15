@@ -11,20 +11,19 @@ REPLAY_OUTPUT_DIR = "output_replays"
 CHECKPOINT_DIR = "checkpoints"
 TENSORBOARD_LOG_DIR = "logs/tensorboard"
 EVAL_REPLAY_DIR = "logs/eval_replays"
-MAX_HEIGHT_REWARD = 1
 # When True, use Noah's wall-aware reward; when False, use the height/win-margin reward.
 USE_NOAHS_REWARD_FUNC = False
 
 # Training
 TOTAL_TRAIN_STEPS = 8_000_000
-N_TRAINING_SUBPROC_ENVIRONMENTS = 20
+N_TRAINING_SUBPROC_ENVIRONMENTS = 30
 EVAL_EVERY_N_STEPS = 100_000
 
 # - - - Hyperparamaters  - - -
 
 # When True, use Noah's wall-aware reward; when False, use the height/win-margin reward.
 USE_NOAHS_REWARD_FUNC = False
-N_RESIDUAL_BLOCKS = 4
+N_RESIDUAL_BLOCKS = 6
 
 # - - - Actions - - -
 FACTORY_MAPPING = {

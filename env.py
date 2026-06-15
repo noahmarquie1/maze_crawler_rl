@@ -105,7 +105,7 @@ class CrawlEnv(gym.Env):
         mask[:, 0] = True  # "IDLE" always valid
 
         type_valid_actions = {
-            0: range(12),  # Factory: 0-11
+            0: [a for a in range(12) if a != 5],  # Factory: 0-11 minus BUILD_SCOUT(5)
             1: range(5),  # Scout: 0-4
             2: range(13),  # Worker: 0-12
             3: range(6),  # Miner: 0-5
@@ -267,9 +267,12 @@ class CrawlEnv(gym.Env):
         JUMP_INVALID_PENALTY = -0.5
         SURVIVAL_REWARD = 0.01
         MAX_LINEAR_HEIGHT_REWARD = 0.01
-        # Reward for consuming a full (MAX_CRYSTAL_ENERGY) crystal; scaled linearly
-        # by the consumed crystal's energy.
-        MAX_CRYSTAL_REWARD = 0.1
+        # Reward for the factory gaining a full crystal's worth (MAX_CRYSTAL_ENERGY)
+        # of energy in a step; scaled linearly by the energy gained.
+        MAX_ENERGY_REWARD = 0.1
+        # Reward for building a worker once scrolling hits 1/turn (after step 400).
+        WORKER_BUILD_REWARD = 0.1
+        WORKER_BUILD_STEP = 400
 
         # NO WIN/LOSS REWARD: survivial is the goal for now - win/loss is too sparse and random with our low winrate
         WIN_REWARD = 0.0
@@ -313,23 +316,34 @@ class CrawlEnv(gym.Env):
             if factory_action.startswith("JUMP") and prev_jump_cooldown > 0:
                 reward += JUMP_INVALID_PENALTY
 
-        # Reward consuming crystals: a crystal visible last step that is gone now and
-        # has one of our robots standing on its cell was picked up by us. Crystal and
-        # robot coordinates are both absolute (col, row).
+        # Reward the factory gaining energy (crystals transferred in, mine income).
+        # Only positive deltas count, so spending energy on builds is not penalized.
         if self.prev_game_obs is not None:
-            our_robot_cells = {
-                (int(r[1]), int(r[2]))
-                for r in obs.robots.values()
-                if r[4] == obs.player
-            }
-            for coord, energy in self.prev_game_obs.crystals.items():
-                if coord in obs.crystals:
-                    continue
-                col, row = int(coord.split(",")[0]), int(coord.split(",")[1])
-                if (col, row) in our_robot_cells:
-                    reward += MAX_CRYSTAL_REWARD * (energy / MAX_CRYSTAL_ENERGY)
+            prev_factory_obs = self.prev_game_obs.robots.get("0-0")
+            curr_factory_obs = obs.robots.get("0-0")
+            if prev_factory_obs is not None and curr_factory_obs is not None:
+                energy_gain = curr_factory_obs[3] - prev_factory_obs[3]
+                if energy_gain > 0:
+                    reward += MAX_ENERGY_REWARD * (energy_gain / MAX_CRYSTAL_ENERGY)
+
+        # Reward building workers late game (after scrolling hits 1/turn). Counting
+        # net new workers avoids rewarding failed/spammed BUILD_WORKER attempts.
+        if self.timestep > WORKER_BUILD_STEP and self.prev_game_obs is not None:
+            new_workers = self._our_worker_count(obs) - self._our_worker_count(
+                self.prev_game_obs
+            )
+            if new_workers > 0:
+                reward += WORKER_BUILD_REWARD * new_workers
 
         return reward
+
+    @staticmethod
+    def _our_worker_count(game_obs):
+        return sum(
+            1
+            for r in game_obs.robots.values()
+            if r[4] == game_obs.player and int(r[0]) == 2
+        )
 
     def reward(self, obs, action, done):
         if USE_NOAHS_REWARD_FUNC:

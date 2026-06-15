@@ -33,7 +33,7 @@ FACTORY_MAPPING = {
     2: "EAST",
     3: "SOUTH",
     4: "WEST",
-    5: "BUILD_SCOUT",
+    # 5 (BUILD_SCOUT) intentionally omitted: scouts are disabled in the action space.
     6: "BUILD_WORKER",
     7: "BUILD_MINER",
     8: "JUMP_NORTH",

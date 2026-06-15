@@ -59,7 +59,6 @@ class CrawlEnv(gym.Env):
         self.observation_space = spaces.Dict(
             {
                 # 0-3,  walls n, e, s, w
-                # 4     visited cells (1 yes, 0 no)
                 # 5-8,  robots factory, scout, worker, miner
                 # 9,    crystals
                 # 10,    mines
@@ -136,14 +135,13 @@ class CrawlEnv(gym.Env):
         obs = {
             # Spatial is:
             # 1. (0-3) walls
-            # 2. 4 - visited cells
-            # 3. (5-8) robot types
-            # 4. (9) crystals
-            # 5. (10) mines
-            # 6. (11) factory energy, painted at the factory cell
-            # 7. (12) factory move cooldown, painted at the factory cell
-            # 8. (13) factory jump cooldown, painted at the factory cell
-            "spatial": np.zeros((14, 20, 20), dtype=np.float32),
+            # 3. (4-7) robot types
+            # 4. (8) crystals
+            # 5. (9) mines
+            # 6. (10) factory energy, painted at the factory cell
+            # 7. (11) factory move cooldown, painted at the factory cell
+            # 8. (12) factory jump cooldown, painted at the factory cell
+            "spatial": np.zeros((13, 20, 20), dtype=np.float32),
             # Stats are:
             # 1. normalized game timestep
             "stats": np.zeros((1,), dtype=np.float32),
@@ -155,12 +153,12 @@ class CrawlEnv(gym.Env):
             type = robot_obs[0]
             row = min(int(robot_obs[2]) - int(base_obs.southBound), 19)
             col = min(int(robot_obs[1]), 19)
-            obs["spatial"][5 + type, row, col] = 1
+            obs["spatial"][4 + type, row, col] = 1
 
             if robot == "0-0":
-                obs["spatial"][11, row, col] = robot_obs[3] / 1000  # factory energy
-                obs["spatial"][12, row, col] = robot_obs[5] / 10  # factory move cd
-                obs["spatial"][13, row, col] = robot_obs[6] / 10  # factory jump cd
+                obs["spatial"][10, row, col] = robot_obs[3] / 1000  # factory energy
+                obs["spatial"][11, row, col] = robot_obs[5] / 10  # factory move cd
+                obs["spatial"][12, row, col] = robot_obs[6] / 10  # factory jump cd
 
         for coord, energy in base_obs.crystals.items():
             row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
@@ -178,12 +176,9 @@ class CrawlEnv(gym.Env):
         obs["spatial"][1] = ((walls & 2) != 0).astype(np.float32)
         obs["spatial"][2] = ((walls & 4) != 0).astype(np.float32)
         obs["spatial"][3] = ((walls & 8) != 0).astype(np.float32)
-        for cell in self.visited_cells:
-            obs["spatial"][4, cell[0], cell[1]] = 1.0
 
         # Global stats: normalized game timestep
         obs["stats"][0] = self.timestep / MAX_GAME_STEPS
-
         return obs
 
     def detect_outcome(self, done, info):

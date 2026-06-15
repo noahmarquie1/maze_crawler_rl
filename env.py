@@ -273,6 +273,12 @@ class CrawlEnv(gym.Env):
         # Reward for building a worker once scrolling hits 1/turn (after step 400).
         WORKER_BUILD_REWARD = 0.1
         WORKER_BUILD_STEP = 400
+        # Penalize the factory running low on energy reserves.
+        LOW_ENERGY_PENALTY = -0.05
+        LOW_ENERGY_THRESHOLD = 200
+        # Penalize the factory being within L1 distance of an enemy robot (crush risk).
+        ENEMY_PROXIMITY_PENALTY = -0.1
+        ENEMY_PROXIMITY_L1 = 2
 
         # NO WIN/LOSS REWARD: survivial is the goal for now - win/loss is too sparse and random with our low winrate
         WIN_REWARD = 0.0
@@ -303,6 +309,19 @@ class CrawlEnv(gym.Env):
             is_close_to_bottom = (row - obs.southBound) < 3
             if is_close_to_bottom:
                 reward += LOW_HEIGHT_PENALTY
+
+            # Penalize low factory energy reserves
+            if curr_factory_obs[3] < LOW_ENERGY_THRESHOLD:
+                reward += LOW_ENERGY_PENALTY
+
+            # Penalize an enemy robot getting close to the factory (crush risk)
+            fcol, frow = int(curr_factory_obs[1]), int(curr_factory_obs[2])
+            for r in obs.robots.values():
+                if r[4] == obs.player:
+                    continue
+                if abs(int(r[1]) - fcol) + abs(int(r[2]) - frow) <= ENEMY_PROXIMITY_L1:
+                    reward += ENEMY_PROXIMITY_PENALTY
+                    break
 
         # Penalize invalid jumps using the pre-step factory jump cooldown
         factory_action = action.get("0-0")

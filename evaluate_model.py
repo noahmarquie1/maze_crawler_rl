@@ -1,12 +1,43 @@
 import os
 
 import numpy as np
+import torch
 
 from env import CrawlEnv
 from sb3_contrib import MaskablePPO
 
 from constants import MODEL_PATH, REPLAY_OUTPUT_DIR
-from model import CNNFeatureExtractor
+
+
+def select_device() -> str:
+    """Pick the best available device. SB3's "auto" only knows cpu/cuda, so we
+    detect MPS (Apple Silicon) ourselves and fall back to cpu otherwise."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def load_model(
+    model_path: str = MODEL_PATH,
+    env: CrawlEnv | None = None,
+    device: str | None = None,
+    **kwargs,
+) -> MaskablePPO:
+    """Load a saved MaskablePPO agent onto the best available device.
+
+    The policy class and its kwargs (``n_residual_blocks`` ...) are restored from
+    the saved archive, so callers only pass overrides they need -- e.g. an ``env``
+    and ``tensorboard_log`` to resume training. ``device`` defaults to cuda/mps/cpu
+    via ``select_device``.
+    """
+    return MaskablePPO.load(
+        model_path,
+        env=env,
+        device=device or select_device(),
+        **kwargs,
+    )
 
 
 def setup_output_dir():
@@ -68,10 +99,7 @@ if __name__ == "__main__":
 
     crawl_env = CrawlEnv()
 
-    model = MaskablePPO.load(
-        MODEL_PATH,
-        policy_kwargs={"features_extractor_class": CNNFeatureExtractor},
-    )
+    model = load_model()
     run_n_episodes(crawl_env, model, EPISODES)
 
-    print(f"Evaluation Finished successfully.")
+    print("Evaluation Finished successfully.")

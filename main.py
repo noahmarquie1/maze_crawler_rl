@@ -1,159 +1,128 @@
-import os
+"""Kaggle Crawl submission entrypoint.
 
-from constants import *
-from opponent import decision_tree_opponent
-import numpy as np
-import torch
-from torch import nn
-from typing import Mapping
+Loads the trained MaskablePPO agent straight from its saved ``.zip`` archive and
+serves it through the ``agent(obs, config)`` interface the competition calls.
+Importing ``model`` first registers the custom ``CrawlMaskablePolicy`` so the
+archive's pickled policy class resolves on load. Observation encoding and action
+masking are reused verbatim from ``env`` -- there is no second copy of the
+network here.
+"""
 import contextlib
+import importlib.machinery
+import os
+import sys
+import types
 
-with contextlib.redirect_stdout(open(os.devnull, 'w')), \
-     contextlib.redirect_stderr(open(os.devnull, 'w')):
-    
-    from kaggle_environments import make
-    from env import CrawlEnv, game_agent
-    rl_env = CrawlEnv()
-
-# Config
-OBS_DIM = 20*20*10 + 4
-ACTION_DIM = 13*400
-
-
-# Custom Policy Class
-class PureCNNFeatureExtractor(nn.Module):
-    def __init__(
-        self,
-        spatial_shape: tuple = (10, 20, 20),
-        metadata_dim: int = 4,           
-        features_dim: int = 128,
-        cnn_head_dim: int = 64,
-        metadata_head_dim: int = 4,
-    ):
-        super(PureCNNFeatureExtractor, self).__init__()
-
-        self.cnn = nn.Sequential(
-            nn.LazyConv2d(8, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.LazyConv2d(16, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.LazyConv2d(4, kernel_size=1, stride=1),
-            nn.ReLU(),
-            nn.Flatten(),
-        )
-
-        with torch.no_grad():
-            sample_input = torch.zeros((1, *spatial_shape))
-            cnn_output_dim = self.cnn(sample_input).shape[1]
-
-        self.cnn_head = nn.Sequential(
-            nn.Linear(cnn_output_dim, cnn_head_dim),
-            nn.ReLU(),
-        )
-        self.metadata_head = nn.Sequential(
-            nn.Linear(metadata_dim, metadata_head_dim),
-            nn.ReLU(),
-        )
-
-        self.linear = nn.Sequential(
-            nn.Linear(cnn_head_dim + metadata_head_dim, features_dim),
-            nn.ReLU(),
-        )
-
-    def forward(self, observations: Mapping[str, torch.Tensor]) -> torch.Tensor:
-        cnn_features = self.cnn(observations["spatial"])
-        cnn_out = self.cnn_head(cnn_features)
-        metadata_out = self.metadata_head(observations["stats"])
-        return self.linear(torch.concat((cnn_out, metadata_out), dim=1))
-
-
-# 2. The Complete Actor Network
-class KaggleActor(nn.Module):
-    def __init__(self, action_dim=13*400):
-        super(KaggleActor, self).__init__()
-        
-        self.features_extractor = PureCNNFeatureExtractor()
-        
-        self.policy_net = nn.Sequential(
-            nn.Linear(128, 64),
-            nn.Tanh(),
-            nn.Linear(64, 64),
-            nn.Tanh()
-        )
-        
-        self.action_net = nn.Linear(64, action_dim)
-
-    def forward(self, observations: Mapping[str, torch.Tensor]) -> torch.Tensor:
-        features = self.features_extractor(observations)
-        hidden = self.policy_net(features)
-        action_logits = self.action_net(hidden)
-        return action_logits
-
-
-if __name__ == "__main__":
-    BASE_DIR = ""
-    from sb3_contrib import MaskablePPO
-    model = MaskablePPO.load("ppo_crawl.zip", env=rl_env)
-    torch.save(model.policy.state_dict(), "policy_weights.pt")
-else:
-    BASE_DIR = "/kaggle_simulations/agent"
-
-
-# Custom RL Setup
-policy = KaggleActor()
-
-policy.load_state_dict(
-    torch.load(os.path.join(BASE_DIR, "policy_weights.pt")), 
-    strict=False
+# When the agent runs in the competition the tarball is unpacked here; running
+# main.py locally resolves assets next to this file instead.
+_AGENT_DIR = "/kaggle_simulations/agent"
+BASE_DIR = (
+    _AGENT_DIR if os.path.isdir(_AGENT_DIR) else os.path.dirname(os.path.abspath(__file__))
 )
-policy.eval()
+
+# sb3_contrib is not installed in the Kaggle runtime, and its stable_baselines3
+# is a different build than the one this model was saved with. We vendor both at
+# their training versions under _vendor/ and put that dir first on sys.path so
+# the saved archive loads against matching code. (Empty/absent locally, where the
+# venv already has them.)
+sys.path.insert(0, os.path.join(BASE_DIR, "_vendor"))
 
 
-def rl_agent(obs_dict) -> np.ndarray: 
-    tensor_obs = {
-        key: torch.tensor(value, dtype=torch.float32).unsqueeze(0) 
-        for key, value in obs_dict.items()
-    }
-    with torch.no_grad():
-        action_logits = policy(tensor_obs)
-        
-    action = action_logits.squeeze(0).view(400, 13).argmax(dim=-1).numpy()
-    return action
+class _StubAttr:
+    """Stand-in for any symbol pulled from a stubbed module. Safe to use as a
+    type annotation, base class, or callable -- none of which actually run at
+    inference."""
+
+    def __init__(self, *args, **kwargs):
+        pass
 
 
-def agent(obs, config): # Main kaggle agent
-    rl_obs = rl_env.format_obs(obs)
-    flattened_obs = np.append(rl_obs['spatial'].flatten(), rl_obs['stats'], axis=0)
-    agent_action = rl_agent(rl_obs)
-    return game_agent(obs, agent_action)
+class _StubModule(types.ModuleType):
+    """Module whose every attribute resolves to ``_StubAttr``, so import-time
+    references like the ``matplotlib.figure.Figure`` annotation in SB3's logger
+    succeed without importing the real, broken package."""
+
+    def __getattr__(self, name):
+        # Let dunders (__file__, __path__, __spec__, ...) fall through to a
+        # normal AttributeError so importlib/inspect can probe the module
+        # safely; only shadow real symbols SB3 reads at import time.
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
+        return _StubAttr
 
 
-# Main Loop - for Debugging
-DEBUG = True
+def _install_stub(name):
+    """Shadow ``name`` with a lenient stub module before the SB3 import chain.
+
+    The Kaggle competition image ships tensorboard and matplotlib builds that
+    crash on import (broken protobuf/tensorflow chain; matplotlib's C extension
+    compiled against numpy 1.x while the runtime has numpy 2.x). SB3 imports both
+    eagerly -- for logging we never do at inference -- and the failures are not
+    plain ImportErrors, so SB3's own guards don't catch them. Shadowing the
+    modules sidesteps the whole problem.
+    """
+    module = _StubModule(name)
+    # A real spec (with origin=None) keeps importlib.util.find_spec happy --
+    # torch._dynamo enumerates some modules (e.g. pandas) that way and a None
+    # __spec__ would raise ValueError.
+    module.__spec__ = importlib.machinery.ModuleSpec(name, loader=None)
+    sys.modules[name] = module
+    return module
+
+
+# Must run before `import model` (which triggers the stable_baselines3 import).
+_install_stub("torch.utils.tensorboard")
+_install_stub("pandas")
+_mpl = _install_stub("matplotlib")
+_mpl.pyplot = _install_stub("matplotlib.pyplot")
+_mpl.figure = _install_stub("matplotlib.figure")
+# SB3's vec_video_recorder imports gymnasium.wrappers.monitoring, which the
+# Kaggle runtime's newer gymnasium no longer ships. Video recording is unused at
+# inference, so stub the missing submodule.
+_gym_mon = _install_stub("gymnasium.wrappers.monitoring")
+_gym_mon.video_recorder = _install_stub("gymnasium.wrappers.monitoring.video_recorder")
+
+import model  # noqa: E402,F401  -- registers CrawlMaskablePolicy for unpickling
+from env import compute_action_masks, format_obs, game_agent  # noqa: E402
+
+MODEL_FILE = os.path.join(BASE_DIR, "ppo_crawl.zip")
+
+# sb3 and kaggle_environments are noisy on import/load; suppress only during
+# setup so the chatter can't corrupt the engine's stdout protocol. CPU keeps the
+# agent portable across the competition's hardware (inference is ~20ms/step).
+with contextlib.redirect_stdout(open(os.devnull, "w")), contextlib.redirect_stderr(
+    open(os.devnull, "w")
+):
+    from sb3_contrib import MaskablePPO
+
+    _model = MaskablePPO.load(MODEL_FILE, device="cpu")
+
+# The agent has no CrawlEnv to count steps, so mirror its timestep: start at 0
+# and advance once per call, matching how the stats channel is normalized in
+# training (CrawlEnv formats step k's observation with timestep == k).
+_timestep = 0
+
+
+def agent(obs, config):
+    global _timestep
+    observation = format_obs(obs, _timestep)
+    masks = compute_action_masks(obs)
+    action, _ = _model.predict(observation, action_masks=masks, deterministic=True)
+    _timestep += 1
+    return game_agent(obs, action)
 
 
 if __name__ == "__main__":
-    #from sb3_contrib import MaskablePPO
-    #model = MaskablePPO.load("checkpoints/ppo_crawl_200000_steps.zip", env=rl_env)
-    #torch.save(model.policy.state_dict(), "policy_weights.pt")
-    with contextlib.redirect_stdout(open(os.devnull, 'w')):
-        kaggle_env = make("crawl")
+    # Local smoke test: play one game against the decision-tree opponent and
+    # write a replay. Not used by the competition.
+    with contextlib.redirect_stdout(open(os.devnull, "w")):
+        from kaggle_environments import make
 
-    if not DEBUG:
-        kaggle_env.run([agent, decision_tree_opponent])
+        from opponent import decision_tree_opponent
 
-    # Optional - debugging mode (does not render)
-    else:
-        trainer = kaggle_env.train([None, decision_tree_opponent])
-        obs = trainer.reset()
-        done = False
-        while not done:
-            action = agent(obs, None)
-            obs, reward, done, info = trainer.step(action)
+        env = make("crawl")
+        env.run([agent, decision_tree_opponent])
 
-
-    html_out = kaggle_env.render(mode="html", width=800, height=800)
     with open("replay.html", "w") as f:
-        f.write(html_out)
-
-    print(f"Game finished successfully. Written to replay.html")
+        f.write(env.render(mode="html", width=800, height=800))
+    print("Game finished successfully. Wrote replay.html")

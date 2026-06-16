@@ -4,6 +4,7 @@ DEBUG = False
 # Game constant: a crystal holds at most 50 energy. Used to normalize the crystal
 # observation channel and the crystal-consumption reward.
 MAX_CRYSTAL_ENERGY = 50
+N_RESIDUAL_BLOCKS = 6
 
 # Outputs
 MODEL_PATH = "ppo_crawl"
@@ -12,18 +13,12 @@ CHECKPOINT_DIR = "checkpoints"
 TENSORBOARD_LOG_DIR = "logs/tensorboard"
 EVAL_REPLAY_DIR = "logs/eval_replays"
 # When True, use Noah's wall-aware reward; when False, use the height/win-margin reward.
-USE_NOAHS_REWARD_FUNC = False
+USE_NOAHS_REWARD_FUNC = True
 
 # Training
-TOTAL_TRAIN_STEPS = 8_000_000
+TOTAL_TRAIN_STEPS = 1_000_000
 N_TRAINING_SUBPROC_ENVIRONMENTS = 30
-EVAL_EVERY_N_STEPS = 100_000
-
-# - - - Hyperparamaters  - - -
-
-# When True, use Noah's wall-aware reward; when False, use the height/win-margin reward.
-USE_NOAHS_REWARD_FUNC = False
-N_RESIDUAL_BLOCKS = 6
+EVAL_EVERY_N_STEPS = 200_000
 
 # - - - Actions - - -
 FACTORY_MAPPING = {

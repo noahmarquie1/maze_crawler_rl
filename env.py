@@ -14,6 +14,7 @@ import os
 import contextlib
 from opponent import decision_tree_opponent
 from kaggle_patches import patch_kaggle_schema_validation
+import random
 
 # Applied at import so every SubprocVecEnv worker (which imports this module)
 # skips the redundant per-step schema validation.
@@ -29,7 +30,7 @@ def game_agent(obs, agent_action):
         rtype = robot_obs[0]
         owner = robot_obs[4]
 
-        row = min(int(robot_obs[2]) - int(obs.southBound), 19)
+        row = min(int(robot_obs[2]) - int(obs["southBound"]), 19)
         col = min(int(robot_obs[1]), 19)
 
         if owner != obs.player:
@@ -52,13 +53,6 @@ def game_agent(obs, agent_action):
 
 
 def format_obs(base_obs, timestep):
-    """Build the policy's Dict observation from a raw Crawl observation.
-
-    Pure function of the engine observation and the current ``timestep`` so it can
-    be reused both by ``CrawlEnv`` during training and by the Kaggle submission
-    agent, which has no ``CrawlEnv`` instance. Shape: spatial (C=13, H=20, W=20)
-    channels-first for the CNN; stats (1,) holds the normalized timestep.
-    """
     obs = {
         # Spatial is:
         # 1. (0-3) walls
@@ -78,22 +72,22 @@ def format_obs(base_obs, timestep):
             continue
 
         type = robot_obs[0]
-        row = min(int(robot_obs[2]) - int(base_obs.southBound), 19)
+        row = min(int(robot_obs[2]) - int(base_obs["southBound"]), 19)
         col = min(int(robot_obs[1]), 19)
         obs["spatial"][4 + type, row, col] = 1
 
-        if robot == "0-0":
+        if robot == f"{base_obs.player}-0":
             obs["spatial"][10, row, col] = robot_obs[3] / 1000  # factory energy
             obs["spatial"][11, row, col] = robot_obs[5] / 10  # factory move cd
             obs["spatial"][12, row, col] = robot_obs[6] / 10  # factory jump cd
 
     for coord, energy in base_obs.crystals.items():
-        row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
+        row = min(int(coord.split(",")[1]) - int(base_obs["southBound"]), 19)
         col = min(int(coord.split(",")[0]), 19)
         obs["spatial"][8, row, col] = 1
 
     for coord, info in base_obs.mines.items():
-        row = min(int(coord.split(",")[1]) - int(base_obs.southBound), 19)
+        row = min(int(coord.split(",")[1]) - int(base_obs["southBound"]), 19)
         col = min(int(coord.split(",")[0]), 19)
         obs["spatial"][9, row, col] = 1
 
@@ -139,7 +133,7 @@ def compute_action_masks(base_obs):
         if owner != base_obs.player:
             continue
 
-        row = min(int(robot_obs[2]) - int(base_obs.southBound), 19)
+        row = min(int(robot_obs[2]) - int(base_obs["southBound"]), 19)
         col = min(int(robot_obs[1]), 19)
 
         idx = row * 20 + col
@@ -195,23 +189,28 @@ class CrawlEnv(gym.Env):
         configuration = {"randomSeed": int(seed)} if seed is not None else None
         with contextlib.redirect_stdout(open(os.devnull, "w")):
             self.base_env = make("crawl", configuration=configuration)
-        self.trainer = self.base_env.train([None, decision_tree_opponent])
+
+        random_pos = random.randint(0, 1)
+        self.player_num = random_pos
+        self.opponent_num = 1 if random_pos == 0 else 0
+        if random_pos == 1:
+            self.trainer = self.base_env.train([None, "random"])
+        else:
+            self.trainer = self.base_env.train(["random", None])
+
         self.game_obs = self.trainer.reset()
 
     def action_masks(self):
         return compute_action_masks(self.game_obs)
-
-    def format_obs(self, base_obs):
-        return format_obs(base_obs, self.timestep)
+    
 
     def detect_outcome(self, done, info):
         # Win/loss/draw detection runs regardless of the active reward function so
         # GameMetricsCallback can log win rate and score margin either way.
         if not done:
             return
-
-        our_score = self.base_env.state[0].reward
-        opponent_score = self.base_env.state[1].reward
+        our_score = self.base_env.state[self.player_num].reward
+        opponent_score = self.base_env.state[self.opponent_num].reward
 
         if our_score > opponent_score:
             outcome = "win"
@@ -249,8 +248,8 @@ class CrawlEnv(gym.Env):
         # dict; the factory's action is read from it for the jump penalty.
         reward = 0
         if done:
-            our_score = self.base_env.state[0].reward
-            opponent_score = self.base_env.state[1].reward
+            our_score = self.base_env.state[self.player_num].reward
+            opponent_score = self.base_env.state[self.opponent_num].reward
             if our_score > opponent_score:
                 reward += WIN_REWARD
             elif our_score < opponent_score:
@@ -258,16 +257,16 @@ class CrawlEnv(gym.Env):
         else:
             reward += SURVIVAL_REWARD
 
-        curr_factory_obs = obs.robots.get("0-0")
+        curr_factory_obs = obs.robots.get(f"{self.player_num}-0")
         if curr_factory_obs is not None:
             # Reward being higher on the board linearly
             board_height = 20
             row = curr_factory_obs[2]
-            relative_height = (row - obs.southBound) / board_height
+            relative_height = (row - obs["southBound"]) / board_height
             reward += MAX_LINEAR_HEIGHT_REWARD * relative_height
 
             # Penalize being close to the bottom of the board
-            is_close_to_bottom = (row - obs.southBound) < 3
+            is_close_to_bottom = (row - obs["southBound"]) < 3
             if is_close_to_bottom:
                 reward += LOW_HEIGHT_PENALTY
 
@@ -285,9 +284,9 @@ class CrawlEnv(gym.Env):
                     break
 
         # Penalize invalid jumps using the pre-step factory jump cooldown
-        factory_action = action.get("0-0")
+        factory_action = action.get(f"{self.player_num}-0")
         prev_factory_obs = (
-            self.prev_game_obs.robots.get("0-0")
+            self.prev_game_obs.robots.get(f"{self.player_num}-0")
             if self.prev_game_obs is not None
             else None
         )
@@ -299,8 +298,8 @@ class CrawlEnv(gym.Env):
         # Reward the factory gaining energy (crystals transferred in, mine income).
         # Only positive deltas count, so spending energy on builds is not penalized.
         if self.prev_game_obs is not None:
-            prev_factory_obs = self.prev_game_obs.robots.get("0-0")
-            curr_factory_obs = obs.robots.get("0-0")
+            prev_factory_obs = self.prev_game_obs.robots.get(f"{self.player_num}-0")
+            curr_factory_obs = obs.robots.get(f"{self.player_num}-0")
 
             # reward newly discovered walls
             curr_walls = np.array(obs.walls, dtype=np.int8)
@@ -351,8 +350,8 @@ class CrawlEnv(gym.Env):
         # dict; the factory's action is read from it for the jump penalty.
         reward = 0
         if done:
-            our_score = self.base_env.state[0].reward
-            opponent_score = self.base_env.state[1].reward
+            our_score = self.base_env.state[self.player_num].reward
+            opponent_score = self.base_env.state[self.opponent_num].reward
             if our_score > opponent_score:
                 reward += WIN_REWARD
             elif our_score < opponent_score:
@@ -360,16 +359,16 @@ class CrawlEnv(gym.Env):
         else:
             reward += SURVIVAL_REWARD
 
-        curr_factory_obs = obs.robots.get("0-0")
+        curr_factory_obs = obs.robots.get(f"{self.player_num}-0")
         if curr_factory_obs is not None:
             # Reward being higher on the board linearly
             board_height = 20
             row = curr_factory_obs[2]
-            relative_height = (row - obs.southBound) / board_height
+            relative_height = (row - obs["southBound"]) / board_height
             reward += MAX_LINEAR_HEIGHT_REWARD * relative_height
 
             # Penalize being close to the bottom of the board
-            is_close_to_bottom = (row - obs.southBound) < 3
+            is_close_to_bottom = (row - obs["southBound"]) < 3
             if is_close_to_bottom:
                 reward += LOW_HEIGHT_PENALTY
 
@@ -387,9 +386,9 @@ class CrawlEnv(gym.Env):
                     break
 
         # Penalize invalid jumps using the pre-step factory jump cooldown
-        factory_action = action.get("0-0")
+        factory_action = action.get(f"{self.player_num}-0")
         prev_factory_obs = (
-            self.prev_game_obs.robots.get("0-0")
+            self.prev_game_obs.robots.get(f"{self.player_num}-0")
             if self.prev_game_obs is not None
             else None
         )
@@ -401,8 +400,8 @@ class CrawlEnv(gym.Env):
         # Reward the factory gaining energy (crystals transferred in, mine income).
         # Only positive deltas count, so spending energy on builds is not penalized.
         if self.prev_game_obs is not None:
-            prev_factory_obs = self.prev_game_obs.robots.get("0-0")
-            curr_factory_obs = obs.robots.get("0-0")
+            prev_factory_obs = self.prev_game_obs.robots.get(f"{self.player_num}-0")
+            curr_factory_obs = obs.robots.get(f"{self.player_num}-0")
             if prev_factory_obs is not None and curr_factory_obs is not None:
                 energy_gain = curr_factory_obs[3] - prev_factory_obs[3]
                 if energy_gain > 0:
@@ -443,7 +442,7 @@ class CrawlEnv(gym.Env):
 
         truncated = 0
         return (
-            self.format_obs(self.game_obs),
+            format_obs(self.game_obs, self.timestep),
             reward,
             done,
             truncated,
@@ -466,7 +465,7 @@ class CrawlEnv(gym.Env):
             else self.np_random.integers(0, np.iinfo(np.int32).max)
         )
         self.make_trainer_env(game_seed)
-        return self.format_obs(self.game_obs), {"seed": int(game_seed)}
+        return format_obs(self.game_obs, self.timestep), {"seed": int(game_seed)}
 
     def render(self, mode="html", width=800, height=800, **kwargs):
         return self.base_env.render(mode=mode, width=width, height=height, **kwargs)

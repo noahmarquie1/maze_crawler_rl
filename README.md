@@ -2,8 +2,11 @@
 
 Competition entry for Kaggle Maze Crawler by Noah Marquié and Michael Dickinson. Using PPO RL architecture to learn competitive maze traversal.
 
-Final model trained using XXX cores for YYY hours on SFU's Fir Supercomputer, beating ZZ% of opponent agents.
+Final model trained using 24 CPU cores and one Nvidia H100 GPU for 3 hours on SFU's Fir Supercomputer.
 
+## Preview
+
+<img src="preview.gif" width=60% alt="Maze Crawler Robot Preview" />
 
 
 ## Usage

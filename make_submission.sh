@@ -9,7 +9,7 @@
 # where main.py loads it from (/kaggle_simulations/agent/ppo_crawl.zip).
 set -euo pipefail
 
-MODEL_ZIP="${1:-ppo_crawl.zip}"
+MODEL_ZIP="ppo_crawl_fir.zip"
 OUT="submission.tar.gz"
 
 if [[ ! -f "$MODEL_ZIP" ]]; then

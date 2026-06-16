@@ -7,6 +7,7 @@ import torch
 from torch import nn
 from typing import Mapping
 import contextlib
+from env import format_obs
 
 with contextlib.redirect_stdout(open(os.devnull, 'w')), \
      contextlib.redirect_stderr(open(os.devnull, 'w')):
@@ -19,6 +20,8 @@ with contextlib.redirect_stdout(open(os.devnull, 'w')), \
 OBS_DIM = 20*20*10 + 4
 ACTION_DIM = 13*400
 DEBUG = True
+
+timestep = 0
 
 
 class InferenceWrapper(torch.nn.Module):
@@ -59,7 +62,7 @@ _policy = torch.jit.load(
 _policy.eval()
 
 def agent(obs, config):
-    rl_obs  = rl_env.format_obs(obs)
+    rl_obs  = format_obs(obs, timestep)
     spatial = torch.tensor(rl_obs["spatial"], dtype=torch.float32).unsqueeze(0)
     stats   = torch.tensor(rl_obs["stats"],   dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
@@ -75,10 +78,12 @@ if __name__ == "__main__":
 
     # Optional - debugging mode (does not render)
     else:
-        trainer = kaggle_env.train([None, decision_tree_opponent])
+        trainer = kaggle_env.train([decision_tree_opponent, None])
         obs = trainer.reset()
         done = False
+        
         while not done:
+            timestep += 1
             action = agent(obs, None)
             obs, reward, done, info = trainer.step(action)
 

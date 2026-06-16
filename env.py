@@ -23,20 +23,40 @@ patch_kaggle_schema_validation()
 MAX_GAME_STEPS = 500  # Crawl runs to step 500; used to normalize the timestep stat
 
 
+def _mirror_ew(action):
+    """Swap EAST<->WEST in an action string; NORTH/SOUTH/IDLE/etc. pass through.
+
+    Used to un-mirror a canonical-frame action back to the engine's global frame
+    when we are player 1. Covers plain moves plus BUILD_*/REMOVE_*/JUMP_*/TRANSFER_*
+    since the cardinal token is a substring. EAST and WEST never co-occur.
+    """
+    if "EAST" in action:
+        return action.replace("EAST", "WEST")
+    if "WEST" in action:
+        return action.replace("WEST", "EAST")
+    return action
+
+
 def game_agent(obs, agent_action):
     actions = {}
+    # Crawl is east/west symmetric and the engine hands player 1 a global frame
+    # (factory on the right). We train/infer in a canonical "always the left
+    # player" frame, so for player 1 the policy's cells are column-mirrored and
+    # its EAST/WEST actions must be flipped back to the global frame.
+    mirror = obs.player == 1
 
     for robot, robot_obs in obs.robots.items():
         rtype = robot_obs[0]
         owner = robot_obs[4]
 
-        row = min(int(robot_obs[2]) - int(obs["southBound"]), 19)
-        col = min(int(robot_obs[1]), 19)
-
         if owner != obs.player:
             continue
 
-        action = agent_action[row * 20 + col]
+        row = min(int(robot_obs[2]) - int(obs["southBound"]), 19)
+        col = min(int(robot_obs[1]), 19)
+        ccol = 19 - col if mirror else col
+
+        action = agent_action[row * 20 + ccol]
         mappings = {
             0: FACTORY_MAPPING,
             1: SCOUT_MAPPING,
@@ -45,7 +65,8 @@ def game_agent(obs, agent_action):
         }
 
         if action in mappings[rtype].keys():
-            actions[robot] = mappings[rtype][action]
+            act_str = mappings[rtype][action]
+            actions[robot] = _mirror_ew(act_str) if mirror else act_str
         else:
             actions[robot] = "IDLE"
 
@@ -76,7 +97,10 @@ def format_obs(base_obs, timestep):
         col = min(int(robot_obs[1]), 19)
         obs["spatial"][4 + type, row, col] = 1
 
-        if robot == f"{base_obs.player}-0":
+        # type == 0 is our factory. (Don't match on a uid like f"{player}-0":
+        # robot uids are "<prefix>-<globalId>", so player 1's factory is "0-1",
+        # not "1-0", and the old string match silently missed it.)
+        if type == 0:
             obs["spatial"][10, row, col] = robot_obs[3] / 1000  # factory energy
             obs["spatial"][11, row, col] = robot_obs[5] / 10  # factory move cd
             obs["spatial"][12, row, col] = robot_obs[6] / 10  # factory jump cd
@@ -99,6 +123,16 @@ def format_obs(base_obs, timestep):
     obs["spatial"][1] = np.where(fog, -1, ((walls & 2) != 0)).astype(np.float32)
     obs["spatial"][2] = np.where(fog, -1, ((walls & 4) != 0)).astype(np.float32)
     obs["spatial"][3] = np.where(fog, -1, ((walls & 8) != 0)).astype(np.float32)
+
+    # Canonicalize to the "always the left player" frame: for player 1, mirror
+    # the board across the vertical axis so the policy sees an identical problem
+    # to player 0. Flipping columns turns each cell's east wall into a west wall,
+    # so the E (ch 1) and W (ch 3) wall channels are swapped; N/S and the
+    # positional channels (robots/crystals/mines/factory) need no channel swap.
+    if base_obs.player == 1:
+        spatial = np.flip(obs["spatial"], axis=2).copy()
+        spatial[[1, 3]] = spatial[[3, 1]]
+        obs["spatial"] = spatial
 
     # Global stats: normalized game timestep
     obs["stats"][0] = timestep / MAX_GAME_STEPS
@@ -135,6 +169,12 @@ def compute_action_masks(base_obs):
 
         row = min(int(robot_obs[2]) - int(base_obs["southBound"]), 19)
         col = min(int(robot_obs[1]), 19)
+        # Mask in the canonical (always-left) frame: mirror the column for
+        # player 1 to match the mirrored observation/action frame. Each type's
+        # valid-action set is symmetric under EAST<->WEST, so only the cell
+        # position needs mirroring, not the action indices.
+        if base_obs.player == 1:
+            col = 19 - col
 
         idx = row * 20 + col
         mask[idx, :] = False
@@ -190,15 +230,26 @@ class CrawlEnv(gym.Env):
         with contextlib.redirect_stdout(open(os.devnull, "w")):
             self.base_env = make("crawl", configuration=configuration)
 
-        random_pos = random.randint(0, 1)
-        self.player_num = random_pos
-        self.opponent_num = 1 if random_pos == 0 else 0
-        if random_pos == 1:
-            self.trainer = self.base_env.train([None, "random"])
+        # Randomize which side we train on. train([None, opp]) controls slot 0
+        # (obs.player == 0); train([opp, None]) controls slot 1 (obs.player == 1).
+        if random.randint(0, 1) == 1:
+            self.trainer = self.base_env.train([decision_tree_opponent, None])
         else:
-            self.trainer = self.base_env.train(["random", None])
+            self.trainer = self.base_env.train([None, decision_tree_opponent])
 
         self.game_obs = self.trainer.reset()
+
+        # Derive our index from the observation so player_num always matches the
+        # controlled slot. (The previous code set player_num independently of the
+        # train() slot order and had them inverted, so reward/outcome read the
+        # opponent's score and factory lookups missed our factory.)
+        self.player_num = self.game_obs.player
+        self.opponent_num = 1 - self.player_num
+        # Factories are the first two robots created (global ids 0 and 1), so our
+        # factory's uid is "0-<player>". NOT f"{player}-0" -- uids are
+        # "<prefix>-<globalId>", which made player 1's factory ("0-1") invisible
+        # to every f"{player}-0" lookup.
+        self.factory_uid = f"0-{self.player_num}"
 
     def action_masks(self):
         return compute_action_masks(self.game_obs)
@@ -257,7 +308,7 @@ class CrawlEnv(gym.Env):
         else:
             reward += SURVIVAL_REWARD
 
-        curr_factory_obs = obs.robots.get(f"{self.player_num}-0")
+        curr_factory_obs = obs.robots.get(self.factory_uid)
         if curr_factory_obs is not None:
             # Reward being higher on the board linearly
             board_height = 20
@@ -284,9 +335,9 @@ class CrawlEnv(gym.Env):
                     break
 
         # Penalize invalid jumps using the pre-step factory jump cooldown
-        factory_action = action.get(f"{self.player_num}-0")
+        factory_action = action.get(self.factory_uid)
         prev_factory_obs = (
-            self.prev_game_obs.robots.get(f"{self.player_num}-0")
+            self.prev_game_obs.robots.get(self.factory_uid)
             if self.prev_game_obs is not None
             else None
         )
@@ -298,8 +349,8 @@ class CrawlEnv(gym.Env):
         # Reward the factory gaining energy (crystals transferred in, mine income).
         # Only positive deltas count, so spending energy on builds is not penalized.
         if self.prev_game_obs is not None:
-            prev_factory_obs = self.prev_game_obs.robots.get(f"{self.player_num}-0")
-            curr_factory_obs = obs.robots.get(f"{self.player_num}-0")
+            prev_factory_obs = self.prev_game_obs.robots.get(self.factory_uid)
+            curr_factory_obs = obs.robots.get(self.factory_uid)
 
             # reward newly discovered walls
             curr_walls = np.array(obs.walls, dtype=np.int8)
@@ -359,7 +410,7 @@ class CrawlEnv(gym.Env):
         else:
             reward += SURVIVAL_REWARD
 
-        curr_factory_obs = obs.robots.get(f"{self.player_num}-0")
+        curr_factory_obs = obs.robots.get(self.factory_uid)
         if curr_factory_obs is not None:
             # Reward being higher on the board linearly
             board_height = 20
@@ -386,9 +437,9 @@ class CrawlEnv(gym.Env):
                     break
 
         # Penalize invalid jumps using the pre-step factory jump cooldown
-        factory_action = action.get(f"{self.player_num}-0")
+        factory_action = action.get(self.factory_uid)
         prev_factory_obs = (
-            self.prev_game_obs.robots.get(f"{self.player_num}-0")
+            self.prev_game_obs.robots.get(self.factory_uid)
             if self.prev_game_obs is not None
             else None
         )
@@ -400,8 +451,8 @@ class CrawlEnv(gym.Env):
         # Reward the factory gaining energy (crystals transferred in, mine income).
         # Only positive deltas count, so spending energy on builds is not penalized.
         if self.prev_game_obs is not None:
-            prev_factory_obs = self.prev_game_obs.robots.get(f"{self.player_num}-0")
-            curr_factory_obs = obs.robots.get(f"{self.player_num}-0")
+            prev_factory_obs = self.prev_game_obs.robots.get(self.factory_uid)
+            curr_factory_obs = obs.robots.get(self.factory_uid)
             if prev_factory_obs is not None and curr_factory_obs is not None:
                 energy_gain = curr_factory_obs[3] - prev_factory_obs[3]
                 if energy_gain > 0:
